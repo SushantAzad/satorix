@@ -8,16 +8,14 @@ from contextlib import contextmanager
 from typing import Generator
 
 from sqlalchemy import create_engine, event, text
-from sqlalchemy.orm import Session, sessionmaker, DeclarativeBase
+from sqlalchemy.orm import Session, sessionmaker, declarative_base
 
 from layer1_ingestion.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
 
-class Base(DeclarativeBase):
-    """Declarative base class for all SQLAlchemy models."""
-    pass
+Base = declarative_base()
 
 
 _engine = None

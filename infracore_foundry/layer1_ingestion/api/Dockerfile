@@ -20,4 +20,4 @@ ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8001
 
-CMD ["uvicorn", "layer1_ingestion.api.main:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
+CMD ["uvicorn", "layer1_ingestion.api.app:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]

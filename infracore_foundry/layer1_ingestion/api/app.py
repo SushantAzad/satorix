@@ -20,7 +20,7 @@ async def lifespan(app: FastAPI):
     """Application startup and shutdown events."""
     logger.info("Starting Layer 1 Data Integration API...")
     settings = get_settings()
-    await init_db()
+    init_db()
     logger.info("Database initialized successfully")
     yield
     logger.info("Shutting down Layer 1 API...")
