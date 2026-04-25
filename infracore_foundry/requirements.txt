@@ -33,3 +33,5 @@ pymysql==1.1.0
 pytest==7.4.3
 pytest-asyncio==0.21.1
 numpy==1.26.4
+kafka-python==2.0.2
+networkx==3.2.1

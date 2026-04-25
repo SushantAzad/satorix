@@ -5,7 +5,7 @@ Loads all environment variables from .env file.
 
 import logging
 from functools import lru_cache
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     api_host: str = Field(default="0.0.0.0", alias="API_HOST")
     api_port: int = Field(default=8001, alias="API_PORT")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    # API authentication — set a strong random value in .env for production.
+    # Generate with: python -c "import secrets; print(secrets.token_hex(32))"
+    api_key: str = Field(default="", alias="API_KEY")
 
     model_config = {
         "env_file": ".env",
@@ -99,11 +102,92 @@ def register_connector(name: str, connector_class: Any) -> None:
     logger.debug("Registered connector type: %s -> %s", name, connector_class.__name__)
 
 
-def get_connector_class(name: str) -> Any:
-    """Look up a connector class by its registered name."""
-    if name not in CONNECTOR_TYPES:
-        available = ", ".join(CONNECTOR_TYPES.keys())
-        raise ValueError(
-            f"Unknown connector type '{name}'. Available types: {available}"
+def get_connector_class(name: str) -> Optional[Any]:
+    """
+    Look up a connector class by its registered name.
+    Returns None (not raises) when the type is unknown so callers can
+    handle the missing-connector case gracefully.
+    """
+    cls = CONNECTOR_TYPES.get(name)
+    if cls is None:
+        available = ", ".join(CONNECTOR_TYPES.keys()) or "(none registered)"
+        logger.warning(
+            "Unknown connector type %r — available: %s", name, available
         )
-    return CONNECTOR_TYPES[name]
+    return cls
+
+
+def _auto_register_connectors() -> None:
+    """
+    Import all known connector modules so they self-register.
+    Called once at app startup and at the top of each Airflow task.
+    """
+    try:
+        from layer1_ingestion.connectors.csv_connector import CSVConnector
+        register_connector("csv", CSVConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.excel_connector import ExcelConnector
+        register_connector("excel", ExcelConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.postgresql_connector import PostgreSQLConnector
+        register_connector("postgresql", PostgreSQLConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.mysql_connector import MySQLConnector
+        register_connector("mysql", MySQLConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.rest_api_connector import RESTAPIConnector
+        register_connector("rest_api", RESTAPIConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.pdf_connector import PDFConnector
+        register_connector("pdf", PDFConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.s3_connector import S3Connector
+        register_connector("s3", S3Connector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.sftp_connector import SFTPConnector
+        register_connector("sftp", SFTPConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.google_sheets_connector import GoogleSheetsConnector
+        register_connector("google_sheets", GoogleSheetsConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.indian.mca21_connector import MCA21Connector
+        register_connector("mca21", MCA21Connector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.indian.sebi_connector import SEBIConnector
+        register_connector("sebi", SEBIConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.indian.rbi_connector import RBIConnector
+        register_connector("rbi", RBIConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.indian.tally_connector import TallyConnector
+        register_connector("tally", TallyConnector)
+    except ImportError:
+        pass
+
+
+# Run auto-registration on module import.
+_auto_register_connectors()

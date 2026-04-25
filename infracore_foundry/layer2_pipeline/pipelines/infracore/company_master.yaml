@@ -1,0 +1,223 @@
+pipeline_id: infracore_company_master
+version: "1.0"
+client_id: infracore
+description: >
+  Cleans and enriches MCA21 company master data.
+  Normalises identifiers, validates compliance fields, resolves duplicates,
+  and enriches with geographic and industry metadata.
+
+lineage_config:
+  entity_type: company
+  entity_id_column: cin
+
+steps:
+  # ── CLEANING ──────────────────────────────────────────────────────────────
+
+  - step_id: trim_strings
+    transform_type: trim_whitespace
+    depends_on: []
+    config:
+      collapse_internal: true
+    quality_rules: []
+
+  - step_id: normalize_company_name
+    transform_type: normalize_case
+    depends_on: [trim_strings]
+    config:
+      columns: [company_name, registered_office_address]
+      mode: title
+    on_error: warn
+
+  - step_id: normalize_cin
+    transform_type: normalize_cin
+    depends_on: [trim_strings]
+    config:
+      column: cin
+      reject_invalid: false
+    quality_rules:
+      - rule_id: cin_not_null
+        rule_type: not_null
+        column: cin
+        severity: error
+        failure_policy: reject
+      - rule_id: cin_format
+        rule_type: regex
+        column: cin
+        severity: error
+        failure_policy: flag
+        parameters:
+          pattern: "^[LU]\\d{5}[A-Z]{2}\\d{4}[A-Z]{3}\\d{6}$"
+
+  - step_id: normalize_pan
+    transform_type: normalize_pan
+    depends_on: [trim_strings]
+    config:
+      column: pan
+    quality_rules:
+      - rule_id: pan_format
+        rule_type: regex
+        column: pan
+        severity: warning
+        failure_policy: flag
+        parameters:
+          pattern: "^[A-Z]{5}[0-9]{4}[A-Z]{1}$"
+
+  - step_id: normalize_gstin
+    transform_type: normalize_gstin
+    depends_on: [trim_strings]
+    config:
+      column: gstin
+      validate_checksum: true
+
+  - step_id: parse_date_of_incorporation
+    transform_type: parse_indian_date
+    depends_on: [trim_strings]
+    config:
+      columns: [date_of_incorporation, last_agm_date, balance_sheet_date]
+    quality_rules:
+      - rule_id: doi_not_null
+        rule_type: not_null
+        column: date_of_incorporation
+        severity: warning
+        failure_policy: flag
+
+  - step_id: compute_company_age
+    transform_type: compute_age
+    depends_on: [parse_date_of_incorporation]
+    config:
+      source_column: date_of_incorporation
+      target_column: company_age_years
+
+  - step_id: parse_paid_up_capital
+    transform_type: parse_indian_number
+    depends_on: [trim_strings]
+    config:
+      columns: [paid_up_capital, authorised_capital]
+    quality_rules:
+      - rule_id: paid_up_capital_positive
+        rule_type: range
+        column: paid_up_capital
+        severity: warning
+        failure_policy: flag
+        parameters:
+          min: 0
+
+  - step_id: normalize_status
+    transform_type: normalize_case
+    depends_on: [trim_strings]
+    config:
+      columns: [company_status, company_category, company_sub_category]
+      mode: title
+    quality_rules:
+      - rule_id: status_in_set
+        rule_type: in_set
+        column: company_status
+        severity: error
+        failure_policy: flag
+        parameters:
+          allowed:
+            - Active
+            - Strike Off
+            - Under Liquidation
+            - Dissolved
+            - Amalgamated
+            - Converted To Llp
+            - Not Available For E-Filing
+
+  # ── ADDRESS ENRICHMENT ────────────────────────────────────────────────────
+
+  - step_id: extract_pin_code
+    transform_type: extract_pin_code
+    depends_on: [normalize_company_name]
+    config:
+      source_column: registered_office_address
+      target_column: pin_code
+
+  - step_id: normalize_state
+    transform_type: normalize_state
+    depends_on: [trim_strings]
+    config:
+      column: state
+
+  - step_id: normalize_city
+    transform_type: normalize_city
+    depends_on: [trim_strings]
+    config:
+      column: city
+
+  - step_id: pin_lookup
+    transform_type: pin_code_lookup
+    depends_on: [extract_pin_code]
+    config:
+      pin_column: pin_code
+      add_columns: [state_from_pin, district, city_from_pin]
+    on_error: warn
+
+  - step_id: state_lookup
+    transform_type: state_lookup
+    depends_on: [normalize_state]
+    config:
+      state_column: state
+      add_columns: [state_code, zone]
+    on_error: warn
+
+  # ── COMPUTED FIELDS ───────────────────────────────────────────────────────
+
+  - step_id: compute_financial_year
+    transform_type: compute_financial_year
+    depends_on: [parse_date_of_incorporation]
+    config:
+      source_column: balance_sheet_date
+      target_column: financial_year
+
+  - step_id: add_source_tag
+    transform_type: add_constant_column
+    depends_on: [trim_strings]
+    config:
+      target_column: data_source
+      value: mca21
+
+  # ── DEDUPLICATION ─────────────────────────────────────────────────────────
+
+  - step_id: dedup_by_cin
+    transform_type: deduplicate_rows
+    depends_on:
+      - normalize_cin
+      - normalize_company_name
+      - parse_date_of_incorporation
+      - parse_paid_up_capital
+      - normalize_status
+      - add_source_tag
+    config:
+      key_columns: [cin]
+      keep: last
+
+  # ── FINAL SELECTION ───────────────────────────────────────────────────────
+
+  - step_id: select_output_columns
+    transform_type: select_columns
+    depends_on: [dedup_by_cin, pin_lookup, state_lookup, compute_financial_year, normalize_pan, normalize_gstin, compute_company_age]
+    config:
+      columns:
+        - cin
+        - company_name
+        - company_status
+        - company_category
+        - company_sub_category
+        - date_of_incorporation
+        - company_age_years
+        - registered_office_address
+        - pin_code
+        - city
+        - state
+        - state_code
+        - zone
+        - district
+        - pan
+        - gstin
+        - paid_up_capital
+        - authorised_capital
+        - last_agm_date
+        - balance_sheet_date
+        - financial_year
+        - data_source

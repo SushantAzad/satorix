@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from layer1_ingestion.api.auth import require_api_key
 from layer1_ingestion.core.database import get_db
 from layer1_ingestion.registry.source_registry import SourceRegistry
 from layer1_ingestion.api.schemas.models import (
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sources", tags=["Data Sources"])
 
 
-@router.post("/", response_model=DataSourceResponse, status_code=201)
+@router.post("/", response_model=DataSourceResponse, status_code=201, dependencies=[Depends(require_api_key)])
 def create_source(body: DataSourceCreate, db: Session = Depends(get_db)):
     registry = SourceRegistry(db)
     source = registry.register_source(
@@ -28,7 +29,7 @@ def create_source(body: DataSourceCreate, db: Session = Depends(get_db)):
     return registry.get_source_masked(source.id)
 
 
-@router.get("/", response_model=DataSourceListResponse)
+@router.get("/", response_model=DataSourceListResponse, dependencies=[Depends(require_api_key)])
 def list_sources(
     client_id: str = None, source_type: str = None,
     is_active: bool = True, skip: int = 0, limit: int = 50,
@@ -45,7 +46,7 @@ def list_sources(
     )
 
 
-@router.get("/{source_id}", response_model=DataSourceResponse)
+@router.get("/{source_id}", response_model=DataSourceResponse, dependencies=[Depends(require_api_key)])
 def get_source(source_id: UUID, db: Session = Depends(get_db)):
     registry = SourceRegistry(db)
     source = registry.get_source_masked(source_id)
@@ -54,7 +55,7 @@ def get_source(source_id: UUID, db: Session = Depends(get_db)):
     return source
 
 
-@router.patch("/{source_id}", response_model=DataSourceResponse)
+@router.patch("/{source_id}", response_model=DataSourceResponse, dependencies=[Depends(require_api_key)])
 def update_source(source_id: UUID, body: DataSourceUpdate, db: Session = Depends(get_db)):
     registry = SourceRegistry(db)
     source = registry.update_source(source_id, **body.model_dump(exclude_none=True))
@@ -63,7 +64,7 @@ def update_source(source_id: UUID, body: DataSourceUpdate, db: Session = Depends
     return registry.get_source_masked(source.id)
 
 
-@router.delete("/{source_id}", status_code=204)
+@router.delete("/{source_id}", status_code=204, dependencies=[Depends(require_api_key)])
 def delete_source(source_id: UUID, db: Session = Depends(get_db)):
     registry = SourceRegistry(db)
     success = registry.soft_delete_source(source_id)

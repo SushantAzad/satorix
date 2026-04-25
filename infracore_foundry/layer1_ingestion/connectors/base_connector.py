@@ -4,6 +4,7 @@ Defines the interface every connector must implement and provides
 common utility methods for logging, validation, and Parquet output.
 """
 
+import builtins
 import hashlib
 import logging
 import time
@@ -19,8 +20,9 @@ from layer1_ingestion.core.storage import upload_parquet, generate_object_path
 logger = logging.getLogger(__name__)
 
 
-class ConnectionError(Exception):
-    """Cannot reach the data source."""
+class ConnectionError(builtins.ConnectionError):
+    """Cannot reach the data source. Extends builtins.ConnectionError so network errors
+    raised by third-party libraries (httpx, psycopg2, paramiko) can also be caught here."""
     def __init__(self, source_id: str, message: str, context: Optional[dict] = None):
         self.source_id = source_id
         self.context = context or {}

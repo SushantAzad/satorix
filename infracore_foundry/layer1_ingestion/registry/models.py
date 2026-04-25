@@ -1,6 +1,6 @@
 """
 SQLAlchemy models for the data source registry.
-Defines DataSource, SyncState, SyncRun, and DataSourceHealth tables.
+Defines DataSource, SyncState, SyncRun, DataSourceHealth, and Alert tables.
 """
 
 import uuid
@@ -8,9 +8,9 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column, String, Text, Integer, Float, Boolean, DateTime,
-    ForeignKey, Index,
+    ForeignKey, Index, BigInteger,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 
 from layer1_ingestion.core.database import Base
@@ -25,8 +25,6 @@ def _new_uuid() -> uuid.UUID:
 
 
 class DataSource(Base):
-    """Registry of all connected data sources."""
-
     __tablename__ = "data_sources"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
@@ -34,15 +32,16 @@ class DataSource(Base):
     source_name = Column(String(500), nullable=False)
     source_type = Column(String(100), nullable=False, index=True)
     description = Column(Text, nullable=True)
-    connection_config = Column(Text, nullable=False)  # JSON, encrypted
+    connection_config = Column(Text, nullable=False)          # AES-256-GCM encrypted JSON blob
     auth_method = Column(String(100), nullable=True)
     environment = Column(String(50), nullable=False, default="production")
     status = Column(String(50), nullable=False, default="active", index=True)
+    consecutive_failures = Column(Integer, nullable=False, default=0)
+    circuit_open = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
     created_by = Column(String(255), nullable=True)
 
-    # Relationships
     sync_states = relationship("SyncState", back_populates="data_source", cascade="all, delete-orphan")
     sync_runs = relationship("SyncRun", back_populates="data_source", cascade="all, delete-orphan")
     health_checks = relationship("DataSourceHealth", back_populates="data_source", cascade="all, delete-orphan")
@@ -56,8 +55,6 @@ class DataSource(Base):
 
 
 class SyncState(Base):
-    """Tracks incremental sync state for each data source."""
-
     __tablename__ = "sync_states"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
@@ -78,8 +75,9 @@ class SyncState(Base):
     status = Column(String(50), nullable=False, default="idle")
     error_message = Column(Text, nullable=True)
     checksum_last_batch = Column(String(128), nullable=True)
+    schema_fingerprint = Column(String(64), nullable=True)
+    incremental_strategy = Column(String(30), nullable=True, default="timestamp")
 
-    # Relationships
     data_source = relationship("DataSource", back_populates="sync_states")
 
     def __repr__(self) -> str:
@@ -87,8 +85,6 @@ class SyncState(Base):
 
 
 class SyncRun(Base):
-    """Individual sync run records for audit and troubleshooting."""
-
     __tablename__ = "sync_runs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
@@ -98,6 +94,8 @@ class SyncRun(Base):
         nullable=False,
         index=True,
     )
+    # Deterministic idempotency key: SHA256(source_id:sync_type:date_partition)[:16]
+    batch_id = Column(String(64), nullable=True, unique=True, index=True)
     started_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     records_extracted = Column(Integer, nullable=True, default=0)
@@ -107,7 +105,6 @@ class SyncRun(Base):
     status = Column(String(50), nullable=False, default="running", index=True)
     error_details = Column(Text, nullable=True)
 
-    # Relationships
     data_source = relationship("DataSource", back_populates="sync_runs")
 
     __table_args__ = (
@@ -119,8 +116,6 @@ class SyncRun(Base):
 
 
 class DataSourceHealth(Base):
-    """Health check results for monitoring data source connectivity and quality."""
-
     __tablename__ = "data_source_health"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
@@ -133,13 +128,14 @@ class DataSourceHealth(Base):
     checked_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     is_reachable = Column(Boolean, nullable=False, default=False)
     response_time_ms = Column(Float, nullable=True)
+    error_message = Column(Text, nullable=True)
     schema_matches = Column(Boolean, nullable=True)
-    freshness_score = Column(Float, nullable=True)  # 0.0 to 1.0
+    schema_fingerprint = Column(String(64), nullable=True)
+    freshness_score = Column(Float, nullable=True)
     volume_anomaly = Column(Boolean, nullable=False, default=False)
     alert_sent = Column(Boolean, nullable=False, default=False)
     alert_type = Column(String(100), nullable=True)
 
-    # Relationships
     data_source = relationship("DataSource", back_populates="health_checks")
 
     __table_args__ = (
@@ -151,26 +147,30 @@ class DataSourceHealth(Base):
 
 
 class Alert(Base):
-    """Alert records for health monitoring notifications."""
-
     __tablename__ = "alerts"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
     source_id = Column(String(255), nullable=False, index=True)
     alert_type = Column(String(100), nullable=False, index=True)
     severity = Column(String(50), nullable=False, index=True)
-    title = Column(String(500), nullable=False)
+    title = Column(String(500), nullable=True)
     message = Column(Text, nullable=False)
+    details = Column(JSONB, nullable=True)
+    # status lifecycle: open → acknowledged → resolved
+    status = Column(String(50), nullable=False, default="open", index=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    acknowledged_at = Column(DateTime(timezone=True), nullable=True)
     resolved_at = Column(DateTime(timezone=True), nullable=True)
     resolved_by = Column(String(255), nullable=True)
     resolution_note = Column(Text, nullable=True)
-    is_active = Column(Boolean, nullable=False, default=True, index=True)
 
     __table_args__ = (
-        Index("ix_alerts_source_active", "source_id", "is_active"),
-        Index("ix_alerts_severity_active", "severity", "is_active"),
+        # One open alert per source per alert_type — deduplication at DB level
+        Index("ix_alerts_source_type_open", "source_id", "alert_type",
+              postgresql_where=Column("status") == "open", unique=True),
+        Index("ix_alerts_source_active", "source_id", "status"),
+        Index("ix_alerts_severity_status", "severity", "status"),
     )
 
     def __repr__(self) -> str:
-        return f"<Alert(id={self.id}, type={self.alert_type}, severity={self.severity})>"
+        return f"<Alert(id={self.id}, type={self.alert_type}, severity={self.severity}, status={self.status})>"
