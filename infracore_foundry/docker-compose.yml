@@ -17,6 +17,8 @@ x-airflow-common: &airflow-common
   volumes:
     - ./layer1_ingestion/airflow/dags:/opt/airflow/dags
     - ./layer2_pipeline/airflow/dags:/opt/airflow/dags/layer2
+    - ./layer4_graph_intelligence/airflow/dags:/opt/airflow/dags/layer4
+    - ./layer4_graph_intelligence:/opt/airflow/layer4
     - ./layer1_ingestion/airflow/plugins:/opt/airflow/plugins
     - airflow_logs:/opt/airflow/logs
   depends_on:
@@ -369,6 +371,45 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    restart: unless-stopped
+
+  layer4-api:
+    build:
+      context: .
+      dockerfile: layer4_graph_intelligence/Dockerfile
+    container_name: infracore_layer4_api
+    ports:
+      - "8004:8004"
+    environment:
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-infracore123}
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      LAYER4_API_PORT: 8004
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LAYER3_API_URL: http://layer3-api:8003
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      API_KEY: ${API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      layer3-api:
+        condition: service_started
     restart: unless-stopped
 
 volumes:
