@@ -10,7 +10,7 @@ import hashlib
 import logging
 import struct
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import pandas as pd
@@ -152,6 +152,32 @@ class PipelineExecutor:
             records_input = len(df)
             named_frames = named_frames or {}
 
+            # --- Cross-batch deduplication ---
+            # Prevents reprocessing records already ingested in a previous sync batch.
+            # Key columns come from cross_batch_dedup.key_columns in pipeline config,
+            # or fall back to lineage_config.entity_id_column (the natural PK).
+            _cross_batch_removed = 0
+            _new_fps: Optional[pd.Series] = None
+            _cbd_key_cols = self._get_cross_batch_key_columns(parsed, raw_config)
+            if _cbd_key_cols and all(c in df.columns for c in _cbd_key_cols):
+                from layer2_pipeline.quality.deduplicator import CrossBatchDeduplicator
+                _cbd = CrossBatchDeduplicator(key_columns=_cbd_key_cols)
+                _seen_fps = self._load_seen_fingerprints(parsed.pipeline_id, ctx.client_id)
+                _all_fps = _cbd.compute_fingerprints(df)
+                df, _cross_batch_removed = _cbd.filter_new(df, _seen_fps)
+                _new_fps = _all_fps[~_all_fps.isin(_seen_fps)].reset_index(drop=True)
+                if _cross_batch_removed > 0:
+                    logger.info(
+                        "Cross-batch dedup: suppressed %d already-seen records (pipeline=%s)",
+                        _cross_batch_removed, parsed.pipeline_id,
+                    )
+                    ctx.warn(f"Cross-batch dedup: {_cross_batch_removed} duplicate records suppressed")
+            elif _cbd_key_cols:
+                logger.debug(
+                    "Cross-batch dedup skipped — key columns %s not all present in schema",
+                    _cbd_key_cols,
+                )
+
             # Execute each step in topological order
             for step_def in parsed.steps:
                 df, ok = self._execute_step(df, step_def, ctx, run, named_frames)
@@ -171,6 +197,19 @@ class PipelineExecutor:
 
             # Write immutable dataset version record
             self._write_dataset_version(run, ctx, parsed, run_id_str, output_path, schema_fp, len(df))
+
+            # Persist cross-batch fingerprints so future runs skip these records
+            if _new_fps is not None and len(_new_fps) > 0:
+                self._persist_fingerprints(
+                    fingerprints=_new_fps.tolist(),
+                    pipeline_id=parsed.pipeline_id,
+                    client_id=ctx.client_id,
+                    batch_id=input_batch_id,
+                    run_id_str=run_id_str,
+                )
+
+            # Publish layer2.clean.ready for Layer 3 ingestion trigger
+            self._publish_layer2_complete(run, parsed, output_path)
 
             return completed_run
 
@@ -435,6 +474,127 @@ class PipelineExecutor:
         run.output_path = output_path
         self.db.commit()
         return run
+
+    # ── cross-batch dedup helpers ──────────────────────────────────────────────
+
+    @staticmethod
+    def _get_cross_batch_key_columns(
+        parsed: "PipelineDefinitionParsed", raw_config: dict
+    ) -> list[str]:
+        """Return key columns for cross-batch fingerprinting, in priority order:
+        1. Explicit cross_batch_dedup.key_columns in pipeline config.
+        2. lineage_config.entity_id_column (the natural entity primary key).
+        """
+        cbd = raw_config.get("cross_batch_dedup", {})
+        if cbd.get("enabled") is False:
+            return []
+        explicit = cbd.get("key_columns", [])
+        if explicit:
+            return explicit
+        lc = parsed.lineage_config or {}
+        eid = lc.get("entity_id_column")
+        return [eid] if eid else []
+
+    def _load_seen_fingerprints(self, pipeline_id: str, client_id: str) -> set[str]:
+        """Load fingerprints seen in the last 90 days for this pipeline."""
+        from layer2_pipeline.models.db_models import BatchFingerprint
+        try:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=90)
+            rows = (
+                self.db.query(BatchFingerprint.fingerprint)
+                .filter(
+                    BatchFingerprint.pipeline_id == pipeline_id,
+                    BatchFingerprint.client_id == client_id,
+                    BatchFingerprint.created_at >= cutoff,
+                )
+                .all()
+            )
+            return {row[0] for row in rows}
+        except Exception as exc:
+            logger.warning("Could not load seen fingerprints (cross-batch dedup skipped): %s", exc)
+            return set()
+
+    def _persist_fingerprints(
+        self,
+        fingerprints: list[str],
+        pipeline_id: str,
+        client_id: str,
+        batch_id: Optional[str],
+        run_id_str: str,
+    ) -> None:
+        """Batch-insert new fingerprints. ON CONFLICT DO NOTHING for idempotency."""
+        if not fingerprints:
+            return
+        try:
+            # Cap per-run inserts to prevent runaway memory on massive batches
+            capped = fingerprints[:50_000]
+            now = datetime.now(timezone.utc)
+            self.db.execute(
+                text("""
+                    INSERT INTO l2_batch_fingerprints
+                        (id, pipeline_id, client_id, fingerprint, first_seen_batch_id, created_at)
+                    VALUES
+                        (:id, :pipeline_id, :client_id, :fingerprint, :batch_id, :created_at)
+                    ON CONFLICT (pipeline_id, fingerprint) DO NOTHING
+                """),
+                [
+                    {
+                        "id": str(uuid.uuid4()),
+                        "pipeline_id": pipeline_id,
+                        "client_id": client_id,
+                        "fingerprint": fp,
+                        "batch_id": batch_id,
+                        "created_at": now,
+                    }
+                    for fp in capped
+                ],
+            )
+            self.db.commit()
+            logger.info(
+                "Persisted %d cross-batch fingerprints for pipeline=%s", len(capped), pipeline_id
+            )
+        except Exception as exc:
+            self.db.rollback()
+            logger.warning("Fingerprint persistence failed (non-fatal): %s", exc)
+
+    def _publish_layer2_complete(
+        self,
+        run: "PipelineRun",
+        parsed: "PipelineDefinitionParsed",
+        output_path: Optional[str],
+    ) -> None:
+        """Publish layer2.clean.ready to Kafka so Layer 3 can trigger ingestion."""
+        if not output_path:
+            return
+        try:
+            import os as _os
+            from kafka import KafkaProducer
+            import json as _json
+
+            producer = KafkaProducer(
+                bootstrap_servers=_os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092"),
+                acks="all",
+                retries=2,
+                value_serializer=lambda v: _json.dumps(v, default=str).encode("utf-8"),
+            )
+            producer.send(
+                "layer2.clean.ready",
+                value={
+                    "run_id": run.run_id,
+                    "pipeline_id": parsed.pipeline_id,
+                    "client_id": run.client_id,
+                    "output_path": output_path,
+                    "records_output": run.records_output,
+                },
+            )
+            producer.flush(timeout=5)
+            producer.close()
+            logger.info(
+                "Published layer2.clean.ready: pipeline=%s output=%s",
+                parsed.pipeline_id, output_path,
+            )
+        except Exception as exc:
+            logger.warning("Kafka layer2.clean.ready publish failed (non-fatal): %s", exc)
 
     def _update_step_run(
         self,

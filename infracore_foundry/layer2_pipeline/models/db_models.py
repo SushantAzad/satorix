@@ -193,6 +193,32 @@ class DatasetVersion(Base):
     )
 
 
+class BatchFingerprint(Base):
+    """
+    Cross-batch deduplication fingerprint store.
+    Each row is one SHA-256 fingerprint of key column values seen in a previous batch.
+    Used by PipelineExecutor to suppress re-processing of records already ingested.
+
+    Unique constraint on (pipeline_id, fingerprint) — duplicates are silently ignored
+    via ON CONFLICT DO NOTHING so concurrent runs never conflict.
+    """
+
+    __tablename__ = "l2_batch_fingerprints"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=_uid)
+    pipeline_id = Column(String(200), nullable=False, index=True)
+    client_id = Column(String(255), nullable=False, index=True)
+    fingerprint = Column(String(64), nullable=False)
+    first_seen_batch_id = Column(String(64), nullable=True)
+    first_seen_run_id = Column(UUID(as_uuid=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+
+    __table_args__ = (
+        Index("ix_l2_fp_pipeline_fingerprint", "pipeline_id", "fingerprint", unique=True),
+        Index("ix_l2_fp_client_pipeline", "client_id", "pipeline_id"),
+    )
+
+
 class DedupGroup(Base):
     """Records of entity resolution decisions — which records were merged and why."""
 

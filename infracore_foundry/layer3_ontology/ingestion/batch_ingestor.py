@@ -176,6 +176,23 @@ class BatchIngestor:
             summary.objects_processed, summary.objects_created, summary.objects_updated,
             len(summary.errors), summary.duration_seconds,
         )
+
+        # Publish layer3.ingest.complete — triggers Layer 4 graph recompute + cache refresh
+        try:
+            from core.kafka_publisher import get_ontology_publisher
+            get_ontology_publisher().emit_ingest_complete({
+                "client_id": client_id,
+                "objects_created": summary.objects_created,
+                "objects_updated": summary.objects_updated,
+                "links_created": summary.links_created,
+                "alerts_created": summary.alerts_created,
+                "risk_scores_updated": summary.risk_scores_updated,
+                "duration_seconds": summary.duration_seconds,
+                "completed_at": summary.completed_at,
+            })
+        except Exception as _ke:
+            logger.warning("Kafka ingest.complete publish failed (non-fatal): %s", _ke)
+
         return summary
 
     async def _extract_links(self, source_name: str, df: pd.DataFrame) -> list[dict]:

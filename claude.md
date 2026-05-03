@@ -617,6 +617,77 @@ A complete project proposal (satorix_proposal.docx) has been generated for compa
 
 ---
 
+## ARCHITECTURE DECISIONS (Read Before Touching Cross-Layer Code)
+
+### Single PostgreSQL Database (Current)
+All layers (1, 2, 3) share one PostgreSQL database (`infracore`). Layer 2 tables are prefixed `l2_`. Layer 3 uses unprefixed names (`ontology_objects`, `ontology_links`, `ontology_events`).
+
+**Why:** Practical for development — avoids connection management complexity across services at low scale.
+
+**Risk:** A slow Layer 3 query can starve Layer 1 connection pool. Schema migrations for any layer affect all layers.
+
+**Production plan:** Separate PostgreSQL instances per layer (or per layer-group: L1/L2 share, L3 gets its own). Connection pooling via PgBouncer per instance. Migration is additive-only — never destructive.
+
+**Rule for Claude Code:** Never add a cross-schema query (e.g., Layer 3 querying `l2_pipeline_runs` directly). Each layer reads only its own tables. Cross-layer data flows via Kafka events and MinIO Parquet files only.
+
+---
+
+### Kafka as the Primary Inter-Layer Event Bus
+As of 2026-05-03, the inter-layer event backbone uses Kafka (primary) + Redis (fallback):
+
+- **Layer 1 → Layer 2:** `layer1.raw.parquet.ready` (Kafka) + `layer1:sync:complete` (Redis fallback)
+- **Layer 2 → Layer 3:** `layer2.clean.ready` (Kafka)
+- **Layer 3 → Layer 4:** `layer3.ontology.changes` (Kafka, fire-and-forget per object) + `layer3.ingest.complete` (Kafka, acknowledged per batch)
+- **Layer 4 internal:** `layer4.cache.invalidate`, `layer4.recompute.triggers`
+
+**Consumer group IDs:**
+- Layer 2 Airflow DAG: `satorix-layer2-airflow-trigger` (topic: `layer1.raw.parquet.ready`)
+- Layer 4 cache invalidator: `satorix-layer4-cache` (topics: `layer3.ontology.changes`, `layer3.ingest.complete`)
+
+**Rule for Claude Code:** Redis is cache-only. Kafka is the event bus. When adding new inter-layer triggers, always publish to Kafka first. Redis LPUSH is kept only as a backward-compat fallback for the Airflow DAG transition period.
+
+---
+
+### Layer 3 vs Layer 4 Graph Intelligence — What's the Difference?
+
+Layer 3 includes: NetworkMapper, PathFinder, ClusterDetector, SharedAttributeDetector, InfluenceScorer, SubgraphExtractor, TemporalAnalyzer. Layer 4 implements the same named subsystems.
+
+**This is not duplication — it is deliberate staging:**
+
+| Dimension | Layer 3 Implementation | Layer 4 Implementation |
+|-----------|----------------------|----------------------|
+| Purpose | Demo-scale, API-serving | Production-scale, streaming |
+| NetworkMapper | Cypher traversal per request | Pre-computed adjacency, hot-entity cache |
+| ClusterDetector | Simple Cypher community query | GDS Louvain + streaming cluster updates via Kafka |
+| InfluenceScorer | Per-request PageRank | Nightly GDS betweenness centrality, cached scores |
+| Data freshness | Real-time (per-request) | Near-real-time (Kafka-triggered recompute) |
+| Scale limit | ~10K nodes | Millions of nodes (GDS native projections) |
+
+**Rule for Claude Code:** Do NOT simplify Layer 4 into "the same as Layer 3 but bigger." Layer 4 adds: (1) pre-computation and caching, (2) streaming recompute via Kafka, (3) GDS native algorithms (betweenness, Louvain), (4) query builder for complex compound intelligence queries. Layer 3 serves simple, real-time traversals. Layer 4 serves high-throughput, pre-computed intelligence.
+
+---
+
+### Cross-Batch Deduplication — Fully Wired (as of 2026-05-03)
+The `CrossBatchDeduplicator` class in `layer2_pipeline/quality/deduplicator.py` is now wired into `PipelineExecutor.execute()`. Fingerprints (SHA-256 of key column values, 16-char hex) are persisted in `l2_batch_fingerprints` table after each successful run.
+
+**Key column resolution (priority order):**
+1. `cross_batch_dedup.key_columns` in pipeline YAML config (explicit override)
+2. `lineage_config.entity_id_column` (the natural entity primary key — CIN, DIN, projectId, etc.)
+3. No dedup if neither is present
+
+**Lookback window:** 90 days (fingerprints older than 90 days are not loaded — practical bound for typical re-sync scenarios).
+
+**Note:** Layer 3's ObjectDataFunnel already uses PostgreSQL `ON CONFLICT` UPSERT for objects and `ON CONFLICT DO NOTHING` for links, so storage-layer duplicates are impossible. The Layer 2 dedup is primarily for efficiency (avoid re-running transforms) and metric accuracy (records_processed counts).
+
+---
+
+### predictProjectCompletionProbability — Heuristic v0
+The function in `layer3_ontology/kinetic/functions/project_probability.py` uses rule-based scoring (not ML). Feature schema version is tracked (`FEATURE_SCHEMA_VERSION = "v0.3"`).
+
+**Layer 5 upgrade:** This function will be replaced by an XGBoost classifier trained on historical Indian infrastructure project outcomes (GeM portal, NHAI concession database, NCLT filing outcomes). The feature vector is intentionally designed to match the planned Layer 5 training schema. **Do not change the feature names without also updating the Layer 5 training specification.**
+
+---
+
 ## NEXT IMMEDIATE PRIORITIES
 
 ### Priority 1: Complete Layer 1 Testing

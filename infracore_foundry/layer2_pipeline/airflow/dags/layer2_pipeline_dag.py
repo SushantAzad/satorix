@@ -60,12 +60,17 @@ def layer2_pipeline_dag():
         if conf.get("batch_id"):
             return _resolve_pipelines_for_batch(conf)
 
-        # Redis queue
+        # Primary: Kafka topic layer1.raw.parquet.ready
+        batches = _poll_kafka_queue(max_items=10)
+        if batches:
+            return batches
+
+        # Fallback: Redis RPOPLPUSH queue (backward compat with direct Redis publishes)
         batches = _poll_redis_queue(max_items=10)
         if batches:
             return batches
 
-        # DB fallback — find Layer 1 runs from last 30 min with no corresponding L2 run
+        # Last resort: DB discovery for recently completed L1 runs not yet processed
         return _find_unprocessed_batches(lookback_minutes=30)
 
     @task
@@ -112,6 +117,52 @@ def layer2_pipeline_dag():
 
 
 _PROCESSING_KEY = "layer1:sync:processing"
+_KAFKA_GROUP_ID = "satorix-layer2-airflow-trigger"
+
+
+def _poll_kafka_queue(max_items: int = 10) -> list[dict]:
+    """
+    Consume up to max_items messages from layer1.raw.parquet.ready.
+    Uses a dedicated consumer group so offsets are tracked across DAG runs.
+    Commits only after successful pipeline resolution (at-least-once delivery).
+    """
+    try:
+        import os
+        from kafka import KafkaConsumer
+        from kafka.errors import NoBrokersAvailable
+
+        consumer = KafkaConsumer(
+            "layer1.raw.parquet.ready",
+            bootstrap_servers=os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092"),
+            group_id=_KAFKA_GROUP_ID,
+            auto_offset_reset="earliest",
+            enable_auto_commit=False,
+            value_deserializer=lambda v: json.loads(v.decode("utf-8")),
+            consumer_timeout_ms=2000,  # Exit loop after 2s with no new messages
+        )
+
+        items: list[dict] = []
+        consumed_count = 0
+        try:
+            for msg in consumer:
+                payload = msg.value
+                resolved = _resolve_pipelines_for_batch(payload)
+                if resolved:
+                    items.extend(resolved)
+                consumed_count += 1
+                if consumed_count >= max_items:
+                    break
+
+            if consumed_count > 0:
+                consumer.commit()
+                logger.info("Consumed %d Kafka messages from layer1.raw.parquet.ready", consumed_count)
+        finally:
+            consumer.close()
+
+        return items
+    except Exception as exc:
+        logger.warning("Kafka poll failed: %s — falling back to Redis", exc)
+        return []
 
 
 def _poll_redis_queue(max_items: int = 10) -> list[dict]:

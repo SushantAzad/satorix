@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
 from core.database import AsyncSessionLocal
+from core.kafka_publisher import get_ontology_publisher
 from .event_store import EventStore, OntologyEvent
 from .neo4j_store import Neo4jStore
 from .elasticsearch_store import ElasticsearchStore
@@ -144,6 +145,14 @@ class ObjectDataFunnel:
             await self._cache_store.invalidate(object_type, primary_key)
         except Exception as e:
             logger.warning("Cache invalidation failed for %s/%s: %s", object_type, primary_key, e)
+
+        # 6. Publish to Kafka layer3.ontology.changes (fire-and-forget for L4 cache invalidation)
+        get_ontology_publisher().emit_change(
+            event_type="OBJECT_CREATED" if is_new else "PROPERTY_CHANGED",
+            object_type=object_type,
+            object_id=primary_key,
+            changed_fields=[c.property_name for c in changes],
+        )
 
         return WriteResult(
             success=True,

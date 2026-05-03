@@ -243,20 +243,36 @@ class SyncEngine:
             run.completed_at = datetime.now(timezone.utc)
             self.db.commit()
 
-            # Notify Layer 2 — non-fatal if Redis is unavailable
+            # Notify Layer 2 — Kafka primary, Redis fallback (both non-fatal)
+            _event_payload = {
+                "batch_id": batch_id,
+                "source_id": source_id_str,
+                "client_id": cid,
+                "output_path": object_path,
+                "records": len(df),
+                "schema_fingerprint": fingerprint,
+            }
+
+            # Primary: Kafka (topic: layer1.raw.parquet.ready)
+            _kafka_ok = False
+            try:
+                from layer1_ingestion.streaming.kafka_producer import get_publisher
+                _kafka_ok = get_publisher().publish(
+                    topic="layer1.raw.parquet.ready",
+                    event=_event_payload,
+                    key=source_id_str,
+                )
+            except Exception as _kafka_exc:
+                logger.warning("Kafka notify failed (falling back to Redis): %s", _kafka_exc)
+
+            # Fallback: Redis LPUSH (kept for backward compatibility with Airflow DAG polling)
             try:
                 import json as _json, os as _os
                 import redis as _redis
                 _r = _redis.from_url(_os.environ.get("REDIS_URL", "redis://redis:6379/0"))
-                _r.lpush(
-                    "layer1:sync:complete",
-                    _json.dumps({
-                        "batch_id": batch_id,
-                        "source_id": source_id_str,
-                        "client_id": cid,
-                        "output_path": object_path,
-                    }),
-                )
+                _r.lpush("layer1:sync:complete", _json.dumps(_event_payload))
+                if not _kafka_ok:
+                    logger.info("Layer 2 notified via Redis (Kafka unavailable): batch_id=%s", batch_id)
             except Exception as _redis_exc:
                 logger.warning("Redis notify failed (non-fatal): %s", _redis_exc)
 

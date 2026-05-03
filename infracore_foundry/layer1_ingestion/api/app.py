@@ -3,6 +3,7 @@ FastAPI application entry point for the Layer 1 Data Integration API.
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -45,10 +46,20 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# Restrict CORS in production — update ALLOWED_ORIGINS in .env
+# Dev: all layer API ports (8001-8007) and dashboard ports (3000-3002).
+# Production: set ALLOWED_ORIGINS env var to a comma-separated list of allowed origins.
+_DEV_ORIGINS = [
+    "http://localhost:3000", "http://localhost:3001", "http://localhost:3002",
+    "http://localhost:8001", "http://localhost:8002", "http://localhost:8003",
+    "http://localhost:8004", "http://localhost:8005", "http://localhost:8006",
+    "http://localhost:8007", "http://localhost:8080", "http://localhost:8090",
+    "http://localhost:9001",
+]
+_ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", ",".join(_DEV_ORIGINS)).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:8001"],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["*"],
