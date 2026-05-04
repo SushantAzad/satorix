@@ -189,7 +189,18 @@ class DateDifference(BaseTransform):
         return df
 
 
-register(ParseIndianDate())
+_PARSE_DATE = ParseIndianDate()
+register(_PARSE_DATE)
 register(ComputeFinancialYear())
 register(ComputeAge())
 register(DateDifference())
+
+
+def DATE_NORMALIZE_TRANSFORM(df: pd.DataFrame, config: dict, context: ExecutionContext, step_id: str) -> pd.DataFrame:
+    col = config.get("column")
+    on_fail = config.get("on_fail", "null")
+    cfg = {"columns": [col]} if col else config
+    result = _PARSE_DATE.apply(df, cfg, context, step_id)
+    if on_fail == "null" and col and col in result.columns:
+        pass  # NaT already fills unparseable values
+    return result

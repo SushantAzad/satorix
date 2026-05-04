@@ -119,7 +119,7 @@ class DataQualityValidator:
         elif rule.rule_type == "not_empty":
             return df[col].isna() | (df[col].astype(str).str.strip() == "")
 
-        elif rule.rule_type == "regex":
+        elif rule.rule_type in ("regex", "regex_match"):
             pattern = params["pattern"]
             return ~df[col].astype(str).str.match(pattern, na=False)
 

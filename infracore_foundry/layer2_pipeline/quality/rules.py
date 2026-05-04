@@ -38,14 +38,22 @@ class QualityRule:
 
     @classmethod
     def from_dict(cls, d: dict) -> "QualityRule":
+        rule_type = d.get("rule_type") or d.get("type", "")
+        column = d.get("column")
+        rule_id = d.get("rule_id") or f"{rule_type}_{column or 'row'}"
+        on_fail = d.get("on_fail") or d.get("failure_policy", "flag")
+        pattern = d.get("pattern")
+        params = d.get("parameters", {})
+        if pattern:
+            params = {**params, "pattern": pattern}
         return cls(
-            rule_id=d["rule_id"],
-            rule_type=d["rule_type"],
-            column=d.get("column"),
+            rule_id=rule_id,
+            rule_type=rule_type,
+            column=column,
             severity=RuleSeverity(d.get("severity", "error")),
-            failure_policy=FailurePolicy(d.get("failure_policy", "flag")),
+            failure_policy=FailurePolicy(on_fail),
             default_value=d.get("default_value"),
-            parameters=d.get("parameters", {}),
+            parameters=params,
             description=d.get("description", ""),
         )
 

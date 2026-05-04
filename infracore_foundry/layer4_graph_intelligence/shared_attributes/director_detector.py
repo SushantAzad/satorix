@@ -45,3 +45,6 @@ class SharedDirectorDetector:
                 limit=limit,
             )
             return [dict(r) for r in await result.fetch(limit)]
+
+
+DirectorConnectionDetector = SharedDirectorDetector

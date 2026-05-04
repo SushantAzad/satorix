@@ -1,8 +1,16 @@
+from dataclasses import dataclass, field
 from typing import Any
 import logging
 from core.neo4j_client import neo4j_client
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class RiskScoreResult:
+    score: int
+    flags: list[str] = field(default_factory=list)
+    confidence: str = "MEDIUM"
 
 
 class CompanyScorer:
@@ -97,4 +105,28 @@ class CompanyScorer:
         return min(score, 100), flags
 
 
+    def score(self, company_props: dict[str, Any]) -> RiskScoreResult:
+        """Synchronous heuristic scorer using props only (no DB). Used for testing and fast-path scoring."""
+        s = 0
+        flags: list[str] = []
+        status = str(company_props.get("status", "")).strip()
+        if "CIRP" in status or "Insolvency" in status or "UnderCIRP" in status:
+            s += 30
+            flags.append("CIRP_ACTIVE")
+        elif status in ("StrikeOff", "Struck Off"):
+            s += 15
+            flags.append("STRUCK_OFF")
+        for f in company_props.get("riskFlags", []):
+            if f not in flags:
+                flags.append(f)
+                s += 10
+        delay = int(company_props.get("delayMonths", 0) or 0)
+        if delay > 0:
+            s += min(delay // 6 * 5, 20)
+        s = min(s, 100)
+        confidence = "HIGH" if len(flags) >= 2 else ("MEDIUM" if len(flags) == 1 else "LOW")
+        return RiskScoreResult(score=s, flags=flags, confidence=confidence)
+
+
 company_scorer = CompanyScorer()
+CompanyRiskScorer = CompanyScorer

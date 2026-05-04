@@ -64,3 +64,6 @@ class LouvainDetector:
             "members_written": len(rows),
             "clusters_found": len(community_ids),
         }
+
+
+LouvainClusterDetector = LouvainDetector

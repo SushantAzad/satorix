@@ -23,7 +23,6 @@ python-jose==3.3.0
 python-dotenv==1.0.0
 pydantic==2.5.0
 pydantic-settings==2.1.0
-apache-airflow[celery,postgres,redis]==2.7.3
 lxml==4.9.3
 chardet==5.2.0
 unidecode==1.3.7
@@ -35,3 +34,14 @@ pytest-asyncio==0.21.1
 numpy==1.26.4
 kafka-python==2.0.2
 networkx==3.2.1
+
+# Layer 5 — Analytics & AI
+asyncpg==0.29.0
+neo4j==5.14.0
+xgboost==2.0.3
+shap==0.44.0
+scikit-learn==1.4.0
+scipy==1.12.0
+sentence-transformers==2.3.1
+anthropic==0.25.0
+aioredis==2.0.1

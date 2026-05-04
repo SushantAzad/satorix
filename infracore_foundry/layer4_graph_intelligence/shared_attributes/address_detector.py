@@ -42,3 +42,6 @@ class SharedAddressDetector:
                 limit=limit,
             )
             return [dict(r) for r in await result.fetch(limit)]
+
+
+AddressConnectionDetector = SharedAddressDetector

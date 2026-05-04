@@ -35,3 +35,19 @@ def get_driver() -> AsyncDriver:
 
 def get_session() -> AsyncSession:
     return get_driver().session(database="neo4j")
+
+
+class _Neo4jClientCompat:
+    """Compatibility shim — mirrors L3 neo4j_client interface for code that imports neo4j_client directly."""
+    async def run_query(self, query: str, parameters: dict | None = None) -> list[dict]:
+        async with get_session() as s:
+            result = await s.run(query, parameters or {})
+            return [dict(r) async for r in result]
+
+    async def run_write(self, query: str, parameters: dict | None = None) -> list[dict]:
+        async with get_session() as s:
+            result = await s.run(query, parameters or {})
+            return [dict(r) async for r in result]
+
+
+neo4j_client = _Neo4jClientCompat()

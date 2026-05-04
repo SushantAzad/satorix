@@ -25,5 +25,8 @@ class ChangeDetector:
 
         return changes
 
+    def detect(self, old: dict[str, Any], new: dict[str, Any]) -> list[dict]:
+        return self.compute_diff(old, new)
+
 
 change_detector = ChangeDetector()

@@ -260,3 +260,53 @@ def detect_identifier_columns(df: pd.DataFrame) -> dict[str, str]:
             logger.debug("Column '%s' detected as %s (score=%.2f)", col, best_type, best_score)
 
     return result
+
+
+# ── Standalone convenience validators (return (is_valid: bool, details: dict)) ──
+
+def validate_cin(value) -> tuple[bool, dict]:
+    if value is None:
+        return False, {"error": "null value"}
+    try:
+        v = str(value).strip().upper().replace(" ", "")
+        if CINValidator.is_valid(v):
+            return True, CINValidator.extract_components(v)
+        return False, {"error": f"does not match CIN pattern: {v!r}"}
+    except Exception as exc:
+        return False, {"error": str(exc)}
+
+
+def validate_pan(value) -> tuple[bool, dict]:
+    if value is None:
+        return False, {"error": "null value"}
+    try:
+        v = str(value).strip().upper().replace(" ", "")
+        if PANValidator.is_valid(v):
+            return True, PANValidator.extract_components(v)
+        return False, {"error": f"does not match PAN pattern: {v!r}"}
+    except Exception as exc:
+        return False, {"error": str(exc)}
+
+
+def validate_din(value) -> tuple[bool, dict]:
+    if value is None:
+        return False, {"error": "null value"}
+    try:
+        v = str(value).strip()
+        if DINValidator.is_valid(v):
+            return True, {"din": DINValidator.normalize(v)}
+        return False, {"error": f"does not match DIN pattern: {v!r}"}
+    except Exception as exc:
+        return False, {"error": str(exc)}
+
+
+def validate_gstin(value) -> tuple[bool, dict]:
+    if value is None:
+        return False, {"error": "null value"}
+    try:
+        v = str(value).strip().upper().replace(" ", "")
+        if not GSTIN_PATTERN.match(v):
+            return False, {"error": f"does not match GSTIN pattern: {v!r}"}
+        return True, GSTINValidator.extract_components(v)
+    except Exception as exc:
+        return False, {"error": str(exc)}

@@ -140,9 +140,22 @@ class RemoveSpecialCharacters(BaseTransform):
 
 
 # Register all instances
-register(TrimWhitespace())
-register(NormalizeCase())
+_TRIM = TrimWhitespace()
+_CASE = NormalizeCase()
+register(_TRIM)
+register(_CASE)
 register(RegexExtract())
 register(RegexReplace())
 register(FillNullString())
 register(RemoveSpecialCharacters())
+
+
+# Module-level callable aliases for direct import
+def STRIP_WHITESPACE_TRANSFORM(df: pd.DataFrame, config: dict, context: ExecutionContext, step_id: str) -> pd.DataFrame:
+    cfg = {"columns": [config["column"]]} if "column" in config else config
+    return _TRIM.apply(df, cfg, context, step_id)
+
+
+def TO_UPPERCASE_TRANSFORM(df: pd.DataFrame, config: dict, context: ExecutionContext, step_id: str) -> pd.DataFrame:
+    cfg = {"columns": [config["column"]], "mode": "upper"} if "column" in config else {**config, "mode": "upper"}
+    return _CASE.apply(df, cfg, context, step_id)

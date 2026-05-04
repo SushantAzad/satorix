@@ -34,6 +34,10 @@ class ColumnProfile:
     anomaly_flags: list[str]
     null_representation: Optional[str]
 
+    @property
+    def null_percentage(self) -> float:
+        return round((1.0 - self.completeness_score) * 100, 2)
+
 
 @dataclass
 class ConsistencyIssue:
@@ -54,6 +58,10 @@ class ProfileReport:
     cross_field_issues: list[ConsistencyIssue]
     overall_quality_score: float
     recommendations: list[str]
+
+    @property
+    def columns(self):
+        return list(self.column_profiles.values())
 
 
 class DataProfiler:

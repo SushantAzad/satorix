@@ -40,6 +40,9 @@ class LineageEvent:
     transform_applied: str
     source_batch_id: Optional[str] = None
 
+    def get(self, key: str, default=None):
+        return getattr(self, key, default)
+
 
 @dataclass
 class FailedRecord:

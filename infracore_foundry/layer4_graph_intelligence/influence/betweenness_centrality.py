@@ -69,3 +69,6 @@ class BetweennessCentralityComputer:
                 """
             )
             return [dict(r) for r in await result.fetch(1000)]
+
+
+BetweennessCentralityScorer = BetweennessCentralityComputer

@@ -35,3 +35,6 @@ class PageRankComputer:
 
         logger.info("PageRank: %d entities", len(rows))
         return {"algorithm": "pagerank", "entities_computed": len(rows)}
+
+
+PageRankScorer = PageRankComputer
