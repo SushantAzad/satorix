@@ -5,7 +5,7 @@ from typing import Optional
 
 from llm.workflows.narrative import generate_path_narrative
 from llm.workflows.extraction import extract_regulatory_action
-from llm.workflows.summarization import summarize_company, explain_cirp_risk
+from llm.workflows.summarization import summarize_company, explain_cirp_risk, generate_entity_intelligence
 from llm.workflows.qa import answer_question
 
 router = APIRouter(prefix="/llm", tags=["llm"])
@@ -37,6 +37,12 @@ class QARequest(BaseModel):
     question: str
     context_cin: Optional[str] = None
     additional_context: Optional[dict] = None
+
+
+class EntityIntelligenceRequest(BaseModel):
+    entity_type: str
+    entity_id: str
+    context: dict = {}
 
 
 @router.post("/narrative")
@@ -104,3 +110,19 @@ async def qa(
         actor_role=x_actor_role or "Analyst",
     )
     return {"answer": answer}
+
+
+@router.post("/entity-intelligence")
+async def entity_intelligence(
+    request: EntityIntelligenceRequest,
+    x_actor_id: Optional[str] = Header(default="api_user"),
+    x_actor_role: Optional[str] = Header(default="Analyst"),
+):
+    narrative = await generate_entity_intelligence(
+        entity_type=request.entity_type,
+        entity_id=request.entity_id,
+        context=request.context,
+        actor_id=x_actor_id or "api_user",
+        actor_role=x_actor_role or "Analyst",
+    )
+    return {"narrative": narrative}

@@ -3,7 +3,8 @@ import type { EntityProfile, SearchResult, NetworkGraph, WatchlistItem } from '.
 
 export const entitiesApi = {
   search: (q: string, limit = 10) =>
-    apiClient.get<SearchResult[]>('/api/v1/entities/search', { params: { q, limit } }).then(r => r.data),
+    apiClient.get('/api/v1/entities/search', { params: { q, limit } })
+      .then(r => (Array.isArray(r.data) ? r.data : (r.data.results ?? [])) as SearchResult[]),
   getProfile: (entityType: string, entityId: string) =>
     apiClient.get<EntityProfile>(`/api/v1/entities/${entityType}/${entityId}`).then(r => r.data),
   getNetwork: (entityType: string, entityId: string, depth = 2) =>

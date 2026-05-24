@@ -1,0 +1,878 @@
+INFRACORE FOUNDRY — COMPLETE COMMERCIAL, TECHNICAL & PRODUCT READINESS AUDIT                                                                    
+                                                                                                                                                  
+  ---                                                                                                                                             
+  PHASE 1 — CURRENT SYSTEM CAPABILITY AUDIT                                                                                                       
+                                                                                                                                                  
+  What The Platform Actually Is                                                                                                                   
+                                                                                                                                                  
+  This is a six-layer data intelligence pipeline with a graph knowledge base at the center, built specifically for Indian corporate intelligence. 
+  It is architecturally ambitious, well-structured, and has significantly more working code than most projects at this stage. Total
+  implementation: ~35,600 Python lines across 6 layers plus 3 React frontends.                                                                    
+                                                            
+  Here is the honest breakdown by capability:                                                                                                     
+  
+  ---                                                                                                                                             
+  Ingestion Capabilities — Fully Working                    
+                                                                                                                                                  
+  Eleven connectors exist and all have real network I/O:
+                                                                                                                                                  
+  - CSV, Excel, PDF (digital + OCR via Tesseract with Hindi support)                                                                              
+  - REST API (5 auth methods, 5 pagination strategies, exponential backoff)                                                                       
+  - MySQL, S3, SFTP, Google Sheets, Webhook                                                                                                       
+  - MCA21 (Sandbox.co.in API + bulk download, Redis-cached), RBI master data, SEBI enforcement orders, TallyPrime (live XML + offline export)
+                                                                                                                                                  
+  The sync engine is production-grade: PostgreSQL advisory locking prevents duplicate runs, deterministic batch IDs for idempotency, watermark    
+  tracking, schema fingerprinting, data profiling on every batch, Kafka notification with Redis fallback. This is genuinely good work.            
+                                                                                                                                                  
+  One lie in the system: Tally.get_record_count() returns hardcoded 0. One stub. Everything else has real implementations.                        
+  
+  Verdict: Production-capable ingestion layer.                                                                                                    
+                                                            
+  ---
+  Graph Intelligence Capabilities — Partially Working
+                                                                                                                                                  
+  The core Neo4j graph layer works:
+                                                                                                                                                  
+  - 11 node types: Company, Director, Project, RegulatoryAction, LegalCase, InsolvencyProceeding, Address, RegulatoryBody, GovernmentEntity,      
+  Event, Alert
+  - 20+ relationship types with proper semantic definitions                                                                                       
+  - BFS network traversal up to configurable depth          
+  - Betweenness centrality, PageRank, Louvain community detection                                                                                 
+  - Shortest path computation
+  - Subgraph extraction, diffing, and export (GraphML, D3, Cytoscape)                                                                             
+  - Temporal network analysis                                                                                                                     
+                                                                                                                                                  
+  What doesn't work in production:                                                                                                                
+  - The natural language query parser is a stub — it parses intent but delegates the actual query composition incompletely
+  - The graph has no client isolation whatsoever. Every entity in Neo4j is global. If you onboard two clients, their data mingles. This is the    
+  single most dangerous architectural gap in the system.                                                                                      
+                                                                                                                                                  
+  Verdict: Core graph operations work. Client isolation is missing.
+                                                                                                                                                  
+  ---                                                       
+  Ontology Capabilities — Fully Working                                                                                                           
+                                                            
+  The ontology layer is genuinely solid:
+                                                                                                                                                  
+  - All 11 entity types have formal semantic definitions with typed properties
+  - Schema registry with versioning                                                                                                               
+  - Relationship validation against defined link types                                                                                            
+  - Schema drift detection via fingerprinting
+  - Orphan detection, duplicate surface detection, impossible-state checking                                                                      
+  - Full Elasticsearch indexing for text search                                                                                                   
+  - Object data funnel for multi-source entity merging                                                                                            
+                                                                                                                                                  
+  Verdict: The ontology design is production-grade.                                                                                               
+                                                                                                                                                  
+  ---                                                                                                                                             
+  Search Capabilities — Fully Working                       
+                                     
+  Elasticsearch-backed full-text search with:
+  - Cross-entity type search (companies, directors, projects simultaneously)                                                                      
+  - CIN/DIN/RERA identifier extraction and normalization                    
+  - Risk score and flag aggregation in results                                                                                                    
+  - Layer 6 normalization handling both Elasticsearch and Palantir response formats                                                               
+                                                                                                                                                  
+  Verdict: Works.                                                                                                                                 
+                                                                                                                                                  
+  ---                                                                                                                                             
+  AI Enrichment Capabilities — Prototype-Level              
+                                                                                                                                                  
+  This is the most nuanced part of the assessment:
+                                                                                                                                                  
+  What actually works:                                                                                                                            
+  - LLM orchestration (Anthropic + Ollama) with prompt caching, audit logging, RBAC, Redis response cache — this code is solid
+  - 7 prompt templates for due diligence, CIRP explanation, regulatory extraction, entity intelligence, Q&A                                       
+  - Report generation assembling L3 data + L4 network + LLM narrative into a structured document           
+  - CIRP risk explanation with SHAP feature attribution — when SHAP values exist                                                                  
+                                                                                                                                                  
+  What is prototype-level:                                                                                                                        
+  - The CIRP "ML model" is a deterministic rule-based heuristic scoring system, not a trained model. There are no model artifacts. The            
+  ModelServingEngine has full infrastructure to load pickle files from MinIO — but no champion model is registered. It falls back to heuristic    
+  scoring 100% of the time. The system acknowledges this with comments like "Phase 2: XGBoost trained on labeled CIRP cases (switch when 50+  
+  examples available)."                                                                                                                           
+  - SHAP explanations return None because TreeExplainer requires an actual tree model, not heuristics.
+  - Feature store exists but is populated from whatever L3/L4 data exists — no curated feature pipeline.
+                                                                                                                                                  
+  Verdict: The LLM enrichment works. The "ML predictions" are rule-based heuristics wearing ML clothing. This distinction matters enormously for  
+  enterprise clients who will ask about model validation.                                                                                         
+                                                                                                                                                  
+  ---                                                                                                                                             
+  Streaming/Event Capabilities — Working Infrastructure, Thin Logic
+                                                                                                                                                  
+  Kafka consumers exist in Layers 1, 3, and 6. Micro-batching works. The alert trigger stream exists. WebSocket real-time updates are wired in
+  Layer 6. However:                                                                                                                               
+                                                            
+  - No dead letter queue handling                                                                                                                 
+  - No offset management or consumer lag monitoring         
+  - Alert routing logic is basic                                                                                                                  
+  - No backpressure handling under volume
+                                                                                                                                                  
+  Verdict: Works at demo scale. Needs hardening for production volume.                                                                            
+                                                                                                                                                  
+  ---                                                                                                                                             
+  Reporting Capabilities — Partially Working                
+                                            
+  The due diligence report generator is genuinely interesting — it assembles:
+  1. Entity profile from Layer 3                                                                                                                  
+  2. Network from Layer 4                                                                                                                         
+  3. CIRP prediction (heuristic)                                                                                                                  
+  4. LLM explanation of risk                                                                                                                      
+  5. Benchmark comparison                                   
+  6. Trend analysis                                                                                                                               
+  7. LLM executive summary
+                                                                                                                                                  
+  The output is a structured JSON that gets persisted to PostgreSQL and cached in Layer 6. The report format is solid.
+                                                                                                                                                  
+  What's missing: PDF/Word export, branded templates, downloadable documents. Everything stays as JSON. An enterprise client expecting a          
+  deliverable report needs a rendered document, not raw JSON.                                                                                     
+                                                                                                                                                  
+  Verdict: Report assembly works. Presentation layer for the report doesn't exist.                                                                
+   
+  ---                                                                                                                                             
+  PHASE 2 — DATAFLOW ANALYSIS                               
+                             
+  Complete End-to-End Flow
+                                                                                                                                                  
+  CLIENT DATA
+      │                                                                                                                                           
+      ▼                                                     
+  LAYER 1 — INGESTION (Port 8001)
+      │
+      │  Input: CSV / Excel / PDF / REST API / MySQL / Tally / MCA21 / SEBI
+      │                                                                                                                                           
+      │  What happens:
+      │  1. Source registered in PostgreSQL (data_sources table, AES-256-GCM encrypted creds)                                                     
+      │  2. Sync triggered: advisory lock acquired, batch_id generated (deterministic hash)                                                       
+      │  3. Connector extracts records → data profiled (nulls, distributions, anomalies)                                                          
+      │  4. Records written to MinIO as Parquet (raw-data bucket, partitioned by source/date)                                                     
+      │  5. SyncState watermark updated in PostgreSQL                                                                                             
+      │  6. Kafka event published: "batch_ready" → Layer 2                                                                                        
+      │                                                                                                                                           
+      │  PostgreSQL tables: data_sources, sync_states, sync_runs, data_source_health                                                              
+      │  MinIO: s3://raw-data/{client_id}/{source_id}/{date}/{batch_id}.parquet                                                                   
+      │                                                                                                                                           
+      ▼                                                                                                                                           
+  LAYER 2 — TRANSFORMATION (Port 8002)                                                                                                            
+      │                                                     
+      │  Input: Kafka "batch_ready" event with MinIO path
+      │                                                                                                                                           
+      │  What happens:
+      │  1. DAG definition loaded (YAML pipeline config)                                                                                          
+      │  2. Topological sort determines execution order                                                                                           
+      │  3. Transform steps execute sequentially:                                                                                                 
+      │     - String cleaning, date parsing, number normalization                                                                                 
+      │     - CIN/DIN/RERA identifier normalization with check-digit validation                                                                   
+      │     - Indian address normalization (PIN codes, state codes)                                                                               
+      │     - Deduplication (exact + fuzzy via rapidfuzz)                                                                                         
+      │     - Entity resolution across batches                                                                                                    
+      │  4. Transformed records written to MinIO (processed-data bucket)                                                                          
+      │  5. Lineage recorded in PostgreSQL                                                                                                        
+      │  6. Kafka event: "records_transformed" → Layer 3                                                                                          
+      │                                                                                                                                           
+      │  PostgreSQL tables: l2_pipeline_runs, l2_transform_steps, l2_lineage
+      │  MinIO: s3://processed-data/{pipeline_id}/{run_id}/output.parquet                                                                         
+      │                                                                                                                                           
+      ▼                                                                                                                                           
+  LAYER 3 — ONTOLOGY (Port 8003)                                                                                                                  
+      │                                                     
+      │  Input: Kafka "records_transformed" event
+      │                                                                                                                                           
+      │  What happens:
+      │  1. Object mapper maps transformed records to semantic entity types                                                                       
+      │  2. Schema validator checks against registered ontology definitions                                                                       
+      │  3. Entity upserted into Neo4j (MERGE on primary key: CIN/DIN/RERA)
+      │  4. Entity properties stored in PostgreSQL (l3_objects table)                                                                             
+      │  5. Entity indexed in Elasticsearch for full-text search                                                                                  
+      │  6. Relationships derived and created in Neo4j                                                                                            
+      │  7. Risk scoring computed (rule-based, stored on node)                                                                                    
+      │  8. Kafka event: "entity_upserted" → Layer 4                                                                                              
+      │                                                                                                                                           
+      │  Neo4j: Nodes (11 types) + Relationships (20+ types), global (no client isolation)                                                        
+      │  PostgreSQL: l3_objects, l3_relationships, l3_events, l3_alerts                                                                           
+      │  Elasticsearch: one index per entity type                                                                                                 
+      │                                                                                                                                           
+      ▼                                                                                                                                           
+  LAYER 4 — GRAPH INTELLIGENCE (Port 8004)                  
+      │                                                                                                                                           
+      │  Input: API calls from Layer 5/6 OR background batch jobs (Airflow)
+      │                                                                                                                                           
+      │  What happens:                                      
+      │  1. Network traversal: BFS up to depth 3 from any entity                                                                                  
+      │  2. Centrality computation: betweenness + PageRank + influence composite                                                                  
+      │  3. Cluster detection: Louvain community detection on director/address networks                                                           
+      │  4. Shared attribute detection: common directors, addresses, regulatory actions                                                           
+      │  5. Path scoring: shortest paths with risk-weighted edges                                                                                 
+      │  6. Influence scores persisted to PostgreSQL (l4_influence_scores)                                                                        
+      │                                                                                                                                           
+      │  PostgreSQL: l4_influence_scores, l4_cluster_members, l4_path_cache                                                                       
+      │  Neo4j: read-only traversals, no writes from L4                                                                                           
+      │                                                                                                                                           
+      ▼                                                                                                                                           
+  LAYER 5 — ANALYTICS & AI (Port 8005)                                                                                                            
+      │                                                     
+      │  Input: API calls from Layer 6
+      │                                                                                                                                           
+      │  What happens:
+      │  1. Feature store consulted for entity features                                                                                           
+      │  2. Model serving: heuristic fallback (no trained models exist yet)
+      │  3. LLM call via OllamaProvider/AnthropicProvider → qwen3:8b / claude-sonnet                                                              
+      │  4. Response cached in Redis (SHA-256 keyed, configurable TTL)                                                                            
+      │  5. All LLM calls audit-logged in PostgreSQL (l5_llm_audit)                                                                               
+      │  6. Report assembled, persisted to l5_reports                                                                                             
+      │                                                                                                                                           
+      │  PostgreSQL: l5_predictions, l5_reports, l5_llm_audit, l5_scenarios, l5_model_registry                                                    
+      │                                                                                                                                           
+      ▼                                                     
+  LAYER 6 — DASHBOARD (Port 8006 + 3000/3001/3002)                                                                                                
+      │                                                                                                                                           
+      │  Input: User interaction via React frontend
+      │                                                                                                                                           
+      │  What happens:                                      
+      │  1. JWT auth against l6_users table
+      │  2. Aggregators call L3/L4/L5 via httpx clients                                                                                           
+      │  3. Network data transformed to Cytoscape.js format for visualization                                                                     
+      │  4. Risk scores, alerts, operational metrics assembled                                                                                    
+      │  5. Reports fetched and cached in l6_report_cache (24h TTL)                                                                               
+      │  6. Real-time updates via Kafka consumer → WebSocket broadcast                                                                            
+      │                                                                                                                                           
+      │  PostgreSQL: l6_users, l6_watchlists, l6_report_cache, l6_recent_views                                                                    
+                                                                                                                                                  
+  Critical observation: The .env file configures all service URLs as localhost. Inside Docker containers, inter-service communication must use    
+  Docker service names (postgres, redis, neo4j, etc.). This means the current .env cannot work inside Docker as-is — it would work if services are
+   run locally (bare metal), or if the docker-compose uses network_mode: host. This needs verification before any deployment.                     
+                                                            
+  ---
+  PHASE 3 — CLIENT DATA ONBOARDING
+                                  
+  How Real Data Gets In
+                                                                                                                                                  
+  Method 1 — CSV Upload                                                                                                                           
+  Current state: Connector exists, API endpoint exists (POST /sources). Manual setup required:                                                    
+  1. Admin must register the source via API (no UI wizard for this)                                                                               
+  2. Schema must be manually mapped to entity types                                                                                               
+  3. Transformation pipeline must be manually configured as YAML DAG                                                                              
+  4. Trigger sync                                                                                                                                 
+                                                            
+  Assessment: Works technically. Requires a developer or technical implementer to set up. A compliance firm cannot self-onboard from CSV without  
+  guidance. Onboarding time: 0.5–1 day per source type with hands-on support.                                                                     
+                                                                                                                                                  
+  Method 2 — REST API Integration                                                                                                                 
+  Fully functional connector with 5 auth methods and 5 pagination strategies. Same manual pipeline setup required. Client must expose an API; you
+  configure the connector.                                                                                                                        
+                                                            
+  Method 3 — Database Connectors                                                                                                                  
+  MySQL connector exists. PostgreSQL would need adding (ironic — the platform itself uses Postgres). Direct DB connections require VPN or network
+  access setup. This is typically the most enterprise-friendly path but also the most operationally complex.                                      
+   
+  Method 4 — MCA21 / SEBI / RBI                                                                                                                   
+  This is the most valuable onboarding path for Indian corporate intelligence. The MCA21 connector uses Sandbox.co.in API — this requires an
+  active Sandbox.co.in subscription. SEBI connector exists. RBI master data connector exists. These can be run in bulk to populate the graph with 
+  public Indian company data without any client providing anything.
+                                                                                                                                                  
+  The real onboarding story for first clients: You would pre-populate the graph with MCA21 data (all registered companies, directors, filings) and
+   let clients query what already exists. Their "onboarding" is then adding their private data (portfolio companies, internal watchlists) on top
+  of a pre-built knowledge base. This is the correct commercial approach.                                                                         
+                                                            
+  Method 5 — TallyPrime
+  Connector for Tally XML server + offline export. This is uniquely valuable for Indian SME clients who use Tally for accounting. Competitive
+  differentiator if this works reliably.                                                                                                          
+   
+  How much manual setup is needed today: Significant. There is no self-service onboarding UI. Every new data source requires:                     
+  - API calls to register the source                        
+  - YAML pipeline definition                                                                                                                      
+  - Manual entity type mapping                              
+  - Technical resource to run and monitor                                                                                                         
+                                         
+  Scalability of onboarding today: Not scalable. This is a single-client, high-touch setup currently. To onboard 5+ clients simultaneously, you   
+  need an onboarding UI, a pipeline template library, and documented playbooks.                                                                   
+                                                                                                                                                  
+  ---                                                                                                                                             
+  PHASE 4 — CLIENT VALUE PROPOSITION                        
+
+  By Client Type
+
+  Compliance Firms                                                                                                                                
+   
+  Problem: Manual research across MCA21, SEBI, court records, news. Currently done by analysts spending 4–8 hours per entity for a due diligence  
+  check.                                                    
+                                                                                                                                                  
+  What this platform provides:                              
+  - Pre-ingested MCA21, SEBI, RBI data eliminates most of the research phase
+  - Director network mapping in seconds (who else does this director sit with, what's their history)                                              
+  - Regulatory action timeline automatically assembled                                              
+  - LLM-generated due diligence summary in structured format                                                                                      
+  - Cross-entity risk correlation (company → directors → related companies → regulatory actions)                                                  
+                                                                                                                                                  
+  Traditional workflow: 2 analysts, 6 hours, deliverable in Word doc.                                                                             
+  Platform workflow: 15 minutes to generate structured intelligence, analyst adds judgment layer.                                                 
+                                                                                                                                                  
+  This is the strongest value proposition in the portfolio. Compliance firms have budget, recurring need, and measurable time savings.            
+                                                                                                                                                  
+  Banks / NBFCs                                                                                                                                   
+                                                            
+  Problem: Loan appraisal requires manual KYC, director background, promoter history, related entity risk. Done across siloed systems.            
+   
+  What this platform provides:                                                                                                                    
+  - Automated promoter background check: director history, disqualification status, prior CIRP involvement
+  - Related party exposure: other companies controlled by same directors                                                                          
+  - CIRP probability score (currently rule-based heuristic — honest limitation)
+  - Network risk: if a key director sits on 3 other stressed companies, that's a signal                                                           
+                                                                                                                                                  
+  However: Banks have stringent data residency, RBI compliance, and vendor onboarding requirements. This is a 6–12 month sales cycle even if the  
+  product is perfect. Not the right first customer.                                                                                               
+                                                                                                                                                  
+  NBFCs                                                                                                                                           
+                                                            
+  Similar to banks but shorter procurement cycles. NBFC-MFIs doing portfolio monitoring are a better early target than large banks.               
+   
+  Legal Intelligence Firms                                                                                                                        
+                                                            
+  Problem: Researching whether a counterparty or opponent has adverse history, related entities, known liabilities.                               
+   
+  What this platform provides:                                                                                                                    
+  - Adverse action history from SEBI/regulatory data        
+  - Corporate structure mapping (parent/subsidiary chains)                                                                                        
+  - Director network — who is connected to whom           
+                                                                                                                                                  
+  Good fit, medium willingness to pay. Legal firms buy intelligence products but expect formatted deliverables (PDFs), not API access to          
+  dashboards.                                                                                                                                     
+                                                                                                                                                  
+  Investigative Teams / Journalists                                                                                                               
+                                                            
+  Problem: Following corporate money trails, shell company networks, beneficial ownership obfuscation.                                            
+   
+  What this platform provides:                                                                                                                    
+  - Graph visualization of director-company networks is genuinely powerful for this use case
+  - Cluster detection catches "corporate families" using common addresses/directors                                                               
+  - CIRP/insolvency proceeding tracking                                            
+                                                                                                                                                  
+  Willingness to pay: Low. Journalists don't have budget. Government investigative teams (ED, CBI, SFIO) have budget but procurement is extremely 
+  complex. Skip for now.                                                                                                                          
+                                                                                                                                                  
+  Enterprise Risk Teams (Corporates)                                                                                                              
+                                                            
+  Problem: Vendor due diligence, counterparty risk, M&A target screening.                                                                         
+                                                            
+  What this platform provides:
+  - Quick risk profile of any Indian company before signing a contract
+  - Ongoing monitoring with alerts when risk status changes                                                                                       
+  - Peer/benchmark comparison                              
+                                                                                                                                                  
+  Good fit, reasonable willingness to pay. This is an underserved segment — most large Indian enterprises do manual Googling + one-off CA reports 
+  for vendor due diligence.                                                                                                                       
+                                                                                                                                                  
+  ---                                                                                                                                             
+  PHASE 5 — PRODUCTION READINESS AUDIT                      
+                                                                                                                                                  
+  Scalability
+                                                                                                                                                  
+  Ingestion layer: Horizontally scalable in theory — async Kafka consumers, stateless connectors. In practice: no horizontal scaling configuration
+   exists. Everything runs as single-process Docker containers.
+                                                                                                                                                  
+  Neo4j: Single instance. No clustering. For a graph with millions of nodes (all Indian companies + directors ≈ 2M+ entities), a single Neo4j     
+  Community Edition instance will become a bottleneck. Neo4j Enterprise clustering is required beyond demo scale, and that carries significant
+  licensing cost.                                                                                                                                 
+                                                            
+  PostgreSQL: Single instance. No read replicas. Multiple layers write to the same instance. Under concurrent client load, this will contend.     
+   
+  LLM (Ollama): Single instance. qwen3:8b on a single GPU/CPU. Each report takes 5–30 seconds depending on hardware. Five concurrent users        
+  generating reports = queue starvation. No request queuing or rate limiting exists.
+                                                                                                                                                  
+  Verdict: Not horizontally scalable today. Fine for a single-client proof of concept. Will fail under simultaneous multi-client load.            
+   
+  ---                                                                                                                                             
+  Fault Tolerance                                           
+                 
+  Circuit breaker: Implemented in Layer 1 (consecutive_failures, circuit_open fields). Only one layer has this.
+                                                                                                                                                  
+  Kafka failure: Layer 1 falls back to Redis notification. Layers 2–6 have no fallback if Kafka is unavailable.                                   
+                                                                                                                                                  
+  Layer 5 LLM failure: Has fallback text ("LLM unavailable — analyst review required"). This is correct.                                          
+                                                            
+  Database failure: No retry logic or connection pool failover beyond what asyncpg provides by default.                                           
+                                                            
+  Verdict: Basic fault tolerance exists in Layer 1. Other layers are brittle.                                                                     
+                                                            
+  ---                                                                                                                                             
+  API Stability                                             
+               
+  60+ endpoints across 6 services. No API versioning beyond the /api/v1 prefix. No API changelog. No backward-compatibility guarantees. This is
+  acceptable for pre-MVP but will cause pain when client integrations are built.                                                                  
+   
+  No rate limiting on any endpoint. A single client can saturate the API with unbounded requests.                                                 
+                                                            
+  ---                                                                                                                                             
+  Security                                                  
+          
+  Critical issues:
+                                                                                                                                                  
+  1. JWT secret is a placeholder string in .env: change-me-in-production-use-python-secrets-token-hex-32. If deployed as-is, any attacker knowing 
+  this can forge tokens for any user. This must be changed before any real deployment.                                                            
+  2. CORS hardcoded to localhost only: CORS origins are ["http://localhost:3000", "http://localhost:3001", "http://localhost:3002"]. A production 
+  deployment will fail CORS checks immediately. This is not a security flaw per se — it actually makes it more secure — but it means the app won't
+   work from any deployed URL without code changes.
+  3. No HTTPS/TLS: All services use HTTP. MINIO_SECURE=false. No SSL termination configured. Everything is plaintext in transit.                  
+  4. No rate limiting: Anyone with a valid token can hammer the API without limit.                                                                
+  5. No API key authentication for inter-service calls: Layer 6 calls Layer 3/4/5 without any authentication. If any layer's port is accessible on
+   the network, it can be called without credentials.                                                                                             
+  6. Token revocation is explicitly absent: The logout route comments "For MVP there is no server-side token revocation." A stolen JWT is valid   
+  until expiry with no way to revoke it.                                                                                                          
+                                                            
+  Non-critical issues:                                                                                                                            
+  - AES-256-GCM encryption on connector credentials in Layer 1 — this is correct
+  - Bcrypt password hashing — this is correct                                                                                                     
+  - Input validation via Pydantic — this is correct         
+                                                                                                                                                  
+  Security verdict: Not suitable for any external-facing deployment in current state. Requires TLS, proper secrets management, rate limiting, and 
+  inter-service auth before any client demo on a non-localhost environment.                                                                       
+                                                                                                                                                  
+  ---                                                                                                                                             
+  Multi-Tenancy                                             
+
+  This is the most structurally dangerous gap in the platform.
+
+  What exists:
+  - client_id field in Layer 1 DataSource model (sources are scoped per client)
+  - client_id field in l6_users table (nullable)                                                                                                  
+  - No enforcement anywhere in the data path    
+                                                                                                                                                  
+  What is missing:                                                                                                                                
+  - Neo4j has zero client isolation. All companies, directors, projects exist in the same graph without any tenant tagging. Client A can see
+  Client B's private entities.                                                                                                                    
+  - Layer 3 API does not filter by client_id. The search endpoint returns all entities globally.
+  - Layer 4 graph traversals are global.                                                                                                          
+  - Layer 5 predictions and reports are not scoped to a client.                                                                                   
+  - The l6_report_cache table has user_id but this is a user-level cache, not tenant-level isolation.                                             
+                                                                                                                                                  
+  The implication: This is designed as a single-tenant shared knowledge base (where all the "data" is public MCA21/SEBI data shared by everyone). 
+  If you want to let Client A and Client B have private data that the other cannot see, that architecture does not exist yet.                     
+                                                                                                                                                  
+  For the first use case (shared public Indian corporate data accessed by all clients), this is acceptable. The moment a client wants to add their
+   own private watchlists, portfolio data, or internal annotations, you have a tenant isolation problem.
+                                                                                                                                                  
+  Verdict: Single-tenant or shared-public-data architecture only. True multi-tenancy requires architectural work on Neo4j (separate databases per 
+  tenant or property-based filtering enforced everywhere).
+                                                                                                                                                  
+  ---                                                       
+  Monitoring
+            
+  - No application performance monitoring (APM) configured — no Prometheus metrics, no Datadog, no OpenTelemetry
+  - No health check aggregation dashboard                                                                                                         
+  - No alerting on service downtime                                                                                                               
+  - No error rate tracking across services                                                                                                        
+  - LLM calls are audit-logged (good) but there's no operational dashboard showing failure rates                                                  
+                                                                                                                                                  
+  Layer 6 operational dashboard shows data quality metrics pulled from Layer 1/3 — but this is a business dashboard, not an infrastructure        
+  monitoring tool.                                                                                                                                
+                                                                                                                                                  
+  Verdict: No production monitoring. You would not know if Layer 4 is down until a user reports an empty graph.                                   
+   
+  ---                                                                                                                                             
+  Test Coverage                                             
+               
+  11 test files for a 35,600-line codebase. That's approximately one test file per 3,200 lines of code. Tests exist for: CSV connector, identifier
+   normalization, consistency rules, profiling, encryption, risk scoring, ontology workflow, incremental indexer, LLM provider.                   
+   
+  Verdict: Test coverage is critically low. Core business logic (graph intelligence, report generation, LLM workflows) has essentially zero test  
+  coverage.                                                 
+                                                                                                                                                  
+  ---                                                       
+  PHASE 6 — MVP STRATEGY
+                                                                                                                                                  
+  What To Include In MVP
+                                                                                                                                                  
+  Layer 1 (Ingestion): Keep MCA21, CSV, REST connectors. Drop SFTP, Google Sheets, MySQL for now. The Tally connector is a differentiator — keep  
+  it.
+                                                                                                                                                  
+  Layer 2 (Transformation): Keep CIN/DIN normalization, deduplication, identifier validation. Drop the full DAG engine complexity — simplify to a 
+  linear pipeline for MVP.
+                                                                                                                                                  
+  Layer 3 (Ontology): Keep Company, Director, RegulatoryAction, InsolvencyProceeding node types. Drop Project, GovernmentEntity, Event, Alert for 
+  now. Keep Neo4j search and network expansion.
+                                                                                                                                                  
+  Layer 4 (Graph Intelligence): Keep network traversal, director interlocks, shared address detection. Drop temporal analysis, scenario           
+  simulation, NL query for MVP.
+                                                                                                                                                  
+  Layer 5 (AI): Keep entity intelligence summary (Ollama), regulatory extraction, due diligence report assembly. Drop agent framework, scenario   
+  simulation, model serving infrastructure — replace with explicit "this uses rule-based scoring" messaging.
+                                                                                                                                                  
+  Layer 6 (Dashboard): Keep entity search, entity profile, network graph visualization, report center. Drop operational dashboard (this is        
+  internal tooling, not client-facing). Simplify to one frontend app instead of three.
+                                                                                                                                                  
+  What To Remove / Hide                                     
+
+  1. The three-frontend structure (intelligence, operational, schema) is operationally complex. Merge into one app.                               
+  2. The agent framework is impressive engineering but adds no immediate client value — hide it.
+  3. The Airflow integration — this adds significant operational overhead. Replace with cron-based scheduling for MVP.                            
+  4. The ML model infrastructure (serving engine, feature store, model registry) — either remove or replace with honest messaging that says "risk 
+  scoring uses deterministic rules based on MCA21 data."                                                                                          
+  5. XBRL parsing, OCR, TallyPrime — keep the code but don't lead with these in the pitch. They're complexity that matters for second clients, not
+   first.                                                                                                                                         
+                                                            
+  What To Simplify                                                                                                                                
+                                                            
+  Data onboarding must become self-service. Today it requires API calls and YAML pipeline definitions. Build a simple web UI: "Upload CSV" → "Map 
+  columns" → "Preview entities" → "Import." This is 3 days of work and transforms the onboarding experience.
+                                                                                                                                                  
+  The .env / Docker networking issue must be fixed before any demo. All service URLs must use Docker service names or be configurable via         
+  environment.
+                                                                                                                                                  
+  ---                                                       
+  PHASE 7 — BEST FIRST USE CASE
+                               
+  Recommended Wedge: Corporate Due Diligence for Compliance Firms
+                                                                                                                                                  
+  Specifically: Director Background + Corporate Network Analysis for pre-investment or pre-lending due diligence.                                 
+                                                                                                                                                  
+  Why this is the strongest wedge:                                                                                                                
+                                                            
+  1. Pain is acute and measurable. A compliance analyst today manually looks up a director on MCA21, searches SEBI enforcement orders, Googles the
+   company name + "fraud", checks NCLT for CIRP proceedings. This takes 3–4 hours per entity. Your platform does this in 30 seconds.
+  2. The data is publicly available. You don't need the client to give you anything. Pre-load MCA21 data, SEBI enforcement orders, NCLT           
+  proceedings. The platform works day one.                                                                                                        
+  3. The graph insight is genuinely unique. "This director sits on 7 other companies, 3 of which are currently in CIRP, and all 7 share a common
+  registered address in Mumbai" — no other tool gives this view instantly. This is the demo moment that wins clients.                             
+  4. Compliance firms have recurring, growing demand. SEBI is expanding disclosure requirements. RBI FLDG guidelines are tightening. RERA
+  enforcement is increasing. The regulatory environment creates structural demand.                                                                
+  5. Willingness to pay is real. A firm currently paying a CA ₹5,000–15,000 per due diligence report, doing 50+ reports per month, will pay
+  ₹1–3L/month for a platform that reduces this to analyst review time.                                                                            
+                                                            
+  Data needed for this use case:                                                                                                                  
+  - MCA21: All registered companies, director-company relationships, filing history
+  - SEBI: Enforcement orders (public), debarment orders                                                                                           
+  - NCLT/CIRP: Insolvency cases (public)                    
+  - RBI: NBFC master data                                                                                                                         
+                                                                                                                                                  
+  UI/Demo that matters:                                                                                                                           
+  1. Search for a person's name or CIN — get instant result                                                                                       
+  2. Click entity → see full profile with risk score, flags, timeline                                                                             
+  3. Click "Network" → see graph of all connected entities with risk banding                                                                      
+  4. Click "Generate Report" → receive LLM-enriched due diligence summary                                                                         
+                                                                                                                                                  
+  ---                                                                                                                                             
+  PHASE 8 — CLIENT DEMO STRATEGY                                                                                                                  
+                                                            
+  Ideal Demo Flow                                                                                                                                 
+                                                            
+  Pre-demo setup: Load MCA21 data for ~5,000 companies in a sector (e.g., real estate + infrastructure). Include 3–5 companies that are under CIRP
+   or have SEBI orders. Ensure director networks are populated.
+                                                                                                                                                  
+  Demo flow (25 minutes):                                   
+
+  Minute 0–3: The Problem Statement                                                                                                               
+  Show a manual research workflow. Google search for "Company X fraud", MCA21 portal navigation, SEBI website search. Show how fragmented and slow
+   this is.                                                                                                                                       
+                                                            
+  Minute 3–8: The Search                                                                                                                          
+  Type a director's name or company CIN into the search bar. Show the instant results across entity types. Click through to an entity profile.
+  Show:                                                                                                                                           
+  - Risk score with risk band badge
+  - Risk flags (CIRP_ACTIVE, REGULATORY_ACTION, DISQUALIFIED_DIRECTOR)                                                                            
+  - Key metrics (company age, status, incorporation date)             
+  - Timeline of events                                                                                                                            
+                                                                                                                                                  
+  Minute 8–16: The Graph — The Money Shot                                                                                                         
+  Click "Network." Show the visual graph of connected entities. Highlight:                                                                        
+  - A director connected to multiple stressed companies (this is what closes deals)
+  - A cluster of companies sharing a registered address                                                                                           
+  - A chain of regulatory actions following an entity       
+                                                                                                                                                  
+  This is where you pause and let the client react. The graph view of director interlocks is viscerally impressive to anyone who has done this    
+  work manually.                                                                                                                                  
+                                                                                                                                                  
+  Minute 16–21: The Report                                                                                                                        
+  Click "Generate Report." Show the assembling of:          
+  - Entity profile                                                                                                                                
+  - Network summary
+  - CIRP risk assessment                                                                                                                          
+  - LLM-generated executive summary in plain English        
+                                                                                                                                                  
+  Emphasize the executive summary quality — frame it as "this is what a junior analyst writes in 4 hours."
+                                                                                                                                                  
+  Minute 21–25: The Monitoring Story                                                                                                              
+  Show the watchlist feature (even if it's basic). "You can add any company to a watchlist and get alerted when its risk status changes." This    
+  turns a one-time tool into a recurring subscription.                                                                                            
+                                                            
+  Dataset that impresses most:                                                                                                                    
+  Pick one real corporate group that is publicly known to have complex structures — there are dozens in Indian business history with documented
+  CIRP cases and director networks. Load their actual MCA21 data. When clients search a name they recognize and see the network materialize, the  
+  demo becomes real.                                        
+                                                                                                                                                  
+  ---                                                       
+  PHASE 9 — COMPETITIVE POSITIONING
+                                                                                                                                                  
+  vs. Palantir Foundry
+                                                                                                                                                  
+  Palantir's actual strengths: Proven enterprise-scale data pipeline, mature ontology system, object-centric application layer, Gotham for        
+  defense/government use, AIP for LLM workflows. Sales motion built around government and large financial institutions. Minimum deal size: $5M+.
+                                                                                                                                                  
+  Your strengths vs. Palantir:                              
+  - Indian regulatory context baked in (CIN, DIN, CIRP, RERA, SEBI, MCA21) — Palantir has none of this natively
+  - Deployable on a single machine with local LLM (no cloud dependency) — viable for data-sensitive Indian clients who won't send data to US      
+  servers                                                                                                                                   
+  - Fraction of the price                                                                                                                         
+  - Faster to demo and close for SME compliance firms       
+                                                                                                                                                  
+  Your weaknesses vs. Palantir:                                                                                                                   
+  - No proven enterprise deployments                                                                                                              
+  - No SLA guarantees                                                                                                                             
+  - No enterprise support organization                      
+  - Architecture gaps (multi-tenancy, monitoring, security)                                                                                       
+  - No marketing, no case studies                           
+                                                                                                                                                  
+  Realistic conclusion: You are not competing with Palantir. Their clients are not your clients. Palantir does not sell to Indian compliance SMEs.
+   Do not position against Palantir — position against manual research workflows.                                                                 
+                                                            
+  vs. Generic BI Dashboards (Power BI, Tableau, Metabase)                                                                                         
+                                                            
+  Your graph intelligence is genuinely different. No BI tool shows director-company networks with risk scoring. BI tools require users to know    
+  what they're looking for — your platform surfaces unknown connections. This is a real differentiator. However, BI tools are deeply embedded in
+  enterprise workflows. Don't try to replace them; complement them.                                                                               
+                                                            
+  vs. Traditional Compliance Software (Accuity, Lexis Nexis, CIBIL)                                                                               
+   
+  These are data providers, not platforms. They sell access to databases. You're selling the intelligence layer on top of public databases. Your  
+  differentiation: graph relationships and network intelligence that these providers don't offer. Your weakness: you don't have their data
+  coverage or regulatory approval as a certified KYC provider.                                                                                    
+                                                            
+  vs. Indian Competitors (Dun & Bradstreet India, Perfios, CreditVidya)                                                                           
+   
+  These are either B2B data APIs or lending-focused credit scoring. No one in the Indian market is offering a graph intelligence platform for     
+  corporate network analysis with local LLM enrichment. This is a real gap.
+                                                                                                                                                  
+  Your actual competitive position: First mover in graph-first corporate intelligence for Indian mid-market compliance and risk teams. The window 
+  of advantage is 12–18 months before someone better-funded replicates the core feature set.
+                                                                                                                                                  
+  ---                                                       
+  PHASE 10 — COMMERCIALIZATION ROADMAP
+                                      
+  Must Fix Before First Client (Weeks 1–4)
+                                                                                                                                                  
+  1. Fix .env / Docker networking for deployment. All localhost references must become Docker service names or configurable host variables.       
+  Without this, nothing works outside a developer's laptop.                                                                                       
+  2. Change JWT secret, set it from environment, never hardcode. One line of change, non-negotiable.                                              
+  3. Enable HTTPS. Add nginx reverse proxy with self-signed cert minimum, Let's Encrypt for any external demo URL.                                
+  4. Fix CORS origins to be configurable. Read from environment variable, not hardcoded.                                                          
+  5. Add inter-service authentication. At minimum, a shared API key header that Layer 6 sends to Layer 3/4/5. Prevents direct access to internal  
+  APIs.                                                                                                                                           
+  6. Build CSV self-service onboarding UI. Upload → column map → preview → import. This is the difference between a demo and a product.           
+  7. Pre-load MCA21 baseline data. Run the MCA21 connector against Sandbox.co.in to populate the graph with real Indian companies and directors.  
+  The platform is useless for demos until real data exists.                                                                                       
+  8. Be honest about CIRP prediction. Remove "ML prediction" language. Call it "risk score based on regulatory signals." This avoids the          
+  credibility-destroying moment when a client asks "what's the AUC-ROC of your model?"                                                            
+  9. Merge the three frontends into one or clearly separate them. Three separate React apps on three ports is confusing for clients.
+                                                                                                                                                  
+  Can Wait (Phase 2, Post First Client)                                                                                                           
+                                                                                                                                                  
+  - Trained ML model for CIRP (need labeled data first)                                                                                           
+  - Horizontal scaling / Neo4j clustering                   
+  - Multi-tenant data isolation (acceptable for first 1–2 clients if they're accessing shared public data)                                        
+  - PDF report export                                                                                                                             
+  - Advanced alerting / monitoring                                                                                                                
+  - Airflow for production scheduling                                                                                                             
+                                                                                                                                                  
+  Infrastructure Needed                                                                                                                           
+   
+  For demos/proof of concept (today):                                                                                                             
+  - A single server: 16 GB RAM, 8 cores, 250 GB SSD. Cost: ~₹8,000–15,000/month on AWS/GCP/Azure.
+  - An Ollama-compatible GPU is strongly preferred for qwen3:8b response time. A4000 or similar.                                                  
+                                                                                                
+  For first paying client deployment:                                                                                                             
+  - Dedicated instance per client (simplest multi-tenancy approach) or a hardened shared instance                                                 
+  - Postgres backup (daily snapshots minimum)                                                                                                     
+  - Basic uptime monitoring (UptimeRobot is free and sufficient initially)                                                                        
+                                                                                                                                                  
+  Deployment strategy: Start with client-dedicated self-hosted deployments. The data-sensitive nature of Indian corporate intelligence means most
+  clients (banks, compliance firms) will prefer on-premise or private cloud over shared SaaS. This is operationally heavy but commercially        
+  necessary for the target market. Budget 0.5 FTE for deployment and maintenance per initial client.
+                                                                                                                                                  
+  ---                                                       
+  PHASE 11 — FINAL VERDICT
+                          
+  1. Current Maturity Level
+                                                                                                                                                  
+  Advanced Prototype, approaching Pre-MVP
+                                                                                                                                                  
+  It is not an MVP because: no client has used it, data onboarding requires developer intervention, security is not hardened for external         
+  exposure, and the most commercially important claim (ML-based CIRP prediction) is actually rule-based heuristics.
+                                                                                                                                                  
+  It is significantly beyond a basic prototype because: the architecture is coherent, the data pipeline is production-capable, 11 connectors have 
+  real network I/O, the graph intelligence is genuinely sophisticated, and the LLM enrichment pipeline is cleanly implemented.
+                                                                                                                                                  
+  ---                                                       
+  2. Technical Readiness Score: 58/100
+                                                                                                                                                  
+  ┌──────────────────────┬───────┬────────────────────────────────────────────────────┐
+  │      Component       │ Score │                       Reason                       │                                                           
+  ├──────────────────────┼───────┼────────────────────────────────────────────────────┤
+  │ Ingestion layer      │ 82    │ Real connectors, solid sync engine                 │
+  ├──────────────────────┼───────┼────────────────────────────────────────────────────┤
+  │ Transformation       │ 75    │ DAG works, needs more pipeline templates           │                                                           
+  ├──────────────────────┼───────┼────────────────────────────────────────────────────┤                                                           
+  │ Ontology/Graph       │ 70    │ Solid design, zero client isolation in Neo4j       │                                                           
+  ├──────────────────────┼───────┼────────────────────────────────────────────────────┤                                                           
+  │ Graph intelligence   │ 65    │ Core traversal works, NL query is stub             │
+  ├──────────────────────┼───────┼────────────────────────────────────────────────────┤                                                           
+  │ AI/LLM enrichment    │ 60    │ Works, but "ML predictions" are heuristics         │
+  ├──────────────────────┼───────┼────────────────────────────────────────────────────┤                                                           
+  │ Security             │ 25    │ Placeholder JWT secret, no HTTPS, no rate limiting │
+  ├──────────────────────┼───────┼────────────────────────────────────────────────────┤                                                           
+  │ Multi-tenancy        │ 15    │ Architecture exists only in Layer 1; nowhere else  │
+  ├──────────────────────┼───────┼────────────────────────────────────────────────────┤                                                           
+  │ Testing              │ 20    │ 11 test files for 35K lines                        │
+  ├──────────────────────┼───────┼────────────────────────────────────────────────────┤                                                           
+  │ Monitoring           │ 10    │ None                                               │
+  ├──────────────────────┼───────┼────────────────────────────────────────────────────┤                                                           
+  │ Deployment readiness │ 30    │ localhost config won't work in Docker              │
+  └──────────────────────┴───────┴────────────────────────────────────────────────────┘                                                           
+   
+  ---                                                                                                                                             
+  3. Commercial Readiness Score: 28/100                     
+                                                                                                                                                  
+  ┌───────────────────────────┬───────┬───────────────────────────────────────────────┐
+  │          Factor           │ Score │                    Reason                     │                                                           
+  ├───────────────────────────┼───────┼───────────────────────────────────────────────┤
+  │ Value proposition clarity │ 70    │ Graph intelligence for compliance is clear    │
+  ├───────────────────────────┼───────┼───────────────────────────────────────────────┤
+  │ Demo-ability              │ 55    │ Demo can be built, but needs real data loaded │                                                           
+  ├───────────────────────────┼───────┼───────────────────────────────────────────────┤                                                           
+  │ Self-service onboarding   │ 10    │ Requires developer to configure               │                                                           
+  ├───────────────────────────┼───────┼───────────────────────────────────────────────┤                                                           
+  │ Security for enterprise   │ 20    │ Not deployable externally today               │
+  ├───────────────────────────┼───────┼───────────────────────────────────────────────┤                                                           
+  │ Honest positioning        │ 40    │ "ML prediction" framing is misleading         │
+  ├───────────────────────────┼───────┼───────────────────────────────────────────────┤                                                           
+  │ Sales material            │ 5     │ Doesn't exist                                 │
+  ├───────────────────────────┼───────┼───────────────────────────────────────────────┤                                                           
+  │ Pricing model             │ 0     │ Not defined                                   │
+  ├───────────────────────────┼───────┼───────────────────────────────────────────────┤                                                           
+  │ Reference clients         │ 0     │ None                                          │
+  ├───────────────────────────┼───────┼───────────────────────────────────────────────┤                                                           
+  │ Compliance certifications │ 0     │ None                                          │
+  └───────────────────────────┴───────┴───────────────────────────────────────────────┘
+
+  ---
+  4. Most Dangerous Weakness
+                                                                                                                                                  
+  The absence of client data isolation in Neo4j combined with the absence of any production security hardening.
+                                                                                                                                                  
+  If you demo this to a compliance firm and they ask "where does my data go, can other clients see it?" — you cannot answer that question         
+  correctly today. Any sophisticated buyer will ask this question in the first meeting. The answer needs to be "each client has isolated data" and
+   today that is architecturally false for the graph layer.                                                                                       
+                                                            
+  This is not just a security issue. It is a deal-killer. No compliance firm, bank, or NBFC will sign a contract without data isolation           
+  guarantees.
+                                                                                                                                                  
+  ---                                                       
+  5. Strongest Advantage
+                        
+  The graph network visualization of Indian corporate structures, with director interlock detection and risk-banded entity relationships, built on
+   real MCA21 data, with LLM-generated summaries — is genuinely differentiated and not available from any current Indian market competitor.       
+   
+  The combination of: real-time network graph + Indian regulatory data (CIN, DIN, CIRP, SEBI) + local LLM (no cloud data exposure) + structured   
+  risk scoring is unique. When demonstrated with real data on a real company that a prospect knows, this closes deals.
+                                                                                                                                                  
+  ---                                                       
+  6. Recommended Next 30-Day Execution Plan
+                                           
+  Days 1–5: Make it deployable
+  - Fix .env service URLs for Docker networking                                                                                                   
+  - Change JWT secret to be environment-driven with a proper generated value
+  - Add nginx with HTTPS (self-signed acceptable for internal demos)                                                                              
+  - Configure CORS from environment variable                                                                                                      
+  - Write a docker-compose.prod.yml that works on an actual server                                                                                
+                                                                                                                                                  
+  Days 6–12: Load real data                                                                                                                       
+  - Activate Sandbox.co.in MCA21 API subscription (or equivalent)
+  - Write and run a bulk ingestion script for 10,000+ Indian companies                                                                            
+  - Populate directors, regulatory actions, CIRP proceedings          
+  - Verify graph has real connected data                                                                                                          
+  - Test the demo flow end-to-end with real entities        
+                                                                                                                                                  
+  Days 13–18: Build minimal onboarding UI                                                                                                         
+  - Simple CSV upload → column mapping → entity type selection → import wizard                                                                    
+  - This is the difference between a tool developers can use and a product clients can use                                                        
+                                                                                                                                                  
+  Days 19–23: Fix the ML messaging                                                                                                                
+  - Rename "CIRP ML Prediction" to "CIRP Risk Score (Rule-Based)"                                                                                 
+  - Add explanation: "Score computed from regulatory signals including CIRP proceedings, director disqualifications, regulatory actions, and      
+  network risk indicators"                                                                                                                        
+  - This is honest, defensible, and still compelling                                                                                              
+                                                            
+  Days 24–28: Build the demo narrative                                                                                                            
+  - Select 3 real Indian corporate groups with publicly known complex structures (CIRP history, director interlocks)                              
+  - Ensure they're in the graph with full network populated                                                                                       
+  - Run through the demo flow until it's smooth and reliable                                                                                      
+  - Prepare one-page capabilities document (not a pitch deck — a factual capability sheet)                                                        
+                                                                                                                                                  
+  Day 29–30: First outreach                                                                                                                       
+  - Target: 5 mid-size compliance firms or NBFC risk teams                                                                                        
+  - Offer: Paid pilot (₹1–2L for 90-day access + onboarding support)                                                                              
+  - Avoid: Banks, government agencies, Tier-1 enterprises — sales cycles too long
+  - Message: "We built a graph intelligence platform for Indian corporate due diligence. It connects MCA21, SEBI, and CIRP data and lets you trace
+   director networks and risk signals in 30 seconds instead of hours. We're offering a paid pilot to 3 firms this quarter."                       
+                                                                                                                                                  
+  The platform is real. The work to make it commercially viable is a 4–6 week focused sprint, not a year-long rebuild. The core architecture is   
+  sound. The gaps are operational and presentational, not fundamental.                      
+
+
+  What do you think should we need to design the UI for these connectors where the client can manually and efficiently connect the data source    
+  himself. Eleven connectors exist and all have real network I/O:                                                                                 
+                                                                                                                                                  
+                                                                                                                                                  
+    - CSV, Excel, PDF (digital + OCR via Tesseract with Hindi support)                                                                            
+                                                                                                                                                  
+    - REST API (5 auth methods, 5 pagination strategies, exponential backoff)                                                                     
+                                                                                                                                                  
+    - MySQL, S3, SFTP, Google Sheets, Webhook                                                                                                     
+                                                                                                                                                  
+    - MCA21 (Sandbox.co.in API + bulk download, Redis-cached), RBI master data, SEBI enforcement orders, TallyPrime (live XML + offline export)   
+                                                                                                                                                  
+
+● Yes, build it — but not all 11 at once, and not with equal depth.
+                                                       
+  The audit identified self-service onboarding as a critical commercial gap. Today a client cannot onboard without a developer configuring YAML   
+  pipelines and making API calls. That's a deal-killer for compliance firms. A connector UI removes that blocker.                                 
+                                                                                                                                                  
+  The main tradeoff is scope vs. time-to-first-client. Building a polished UI for all 11 connectors before your first paying client is the wrong  
+  order. The right order is: build the 3 connectors that win the first client, then expand the UI after you have revenue.                         
+                                                                                                                                                  
+  ---                                                       
+  How to tier the 11 connectors by priority:
+                                                                                                                                                  
+  Tier 1 — Build UI first (weeks 1–2):
+  - CSV / Excel / PDF — drag-and-drop upload, column mapper, entity type selector. This is the universal onboarding path. Every client has        
+  spreadsheets.                                                                                                                                   
+  - MCA21 — single config screen (Sandbox.co.in API key + state/company type filters). This is what pre-populates the graph before any client     
+  touches it. It needs a UI so you can demonstrate the setup, not just run it from a script.                                                      
+                                                                                                                                                  
+  Tier 2 — Build UI second (post first client):
+  - REST API — needs a proper multi-step wizard (endpoint URL → auth method → pagination config → field mapping → test call). This is             
+  Fivetran/Airbyte territory. Worth building well, but it's complex and the majority of first clients won't use it.                               
+  - TallyPrime — requires explaining to the client how to expose their Tally XML server, which is a support conversation, not a self-service UI.
+  Build a guided setup wizard with step-by-step screenshots, not a generic config form.                                                           
+                                                                                                                                                  
+  Tier 3 — Ship with minimal UI or skip for now:
+  - MySQL / SFTP / S3 — only enterprise clients with technical teams need these. A connection string form plus a test button is sufficient for    
+  now.                                                                                                                                            
+  - Google Sheets — OAuth2 flow, one button. Low complexity, low priority.
+  - RBI / SEBI — these are background system connectors you run, not something clients configure. They don't need client-facing UI.               
+  - Webhook — needs documentation more than UI. Advanced use case.                                                                 
+                                                                                                                                                  
+  ---                                                                                                                                             
+  The design pattern to follow:                                                                                                                   
+                                                                                                                                                  
+  Look at how Airbyte and Fivetran handle connector setup — a consistent 3-step wizard: (1) configure credentials, (2) test connection, (3)
+  configure what to sync. Every connector uses the same shell, only the fields inside change. This is the right pattern because it makes all 11   
+  connectors feel like one product rather than 11 different tools.
+                                                                                                                                                  
+  The column-mapping step (after connection) is where you add specific value over generic ETL tools — because you're mapping to your ontology     
+  (Company, Director, Project), not just moving data. That screen needs to be designed carefully. Showing a side-by-side preview ("your column
+  company_name → maps to Company.name") with a live sample row builds trust immediately.                                                          
+                                                            
+  ---
+  Scope estimate before you decide:
+                                                                                                                                                  
+  Tier 1 UI (CSV + MCA21 + basic column mapper) is realistically 4–6 days of focused frontend work. That's what you need before a first client
+  demo. The full 11-connector UI with polished wizard flows is 3–4 weeks. Do not let the full scope delay first-client outreach.        

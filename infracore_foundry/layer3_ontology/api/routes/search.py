@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from typing import Any, Optional
+from core.client_context import get_client_id
 from storage.elasticsearch_store import ElasticsearchStore
 
 router = APIRouter(prefix="/search", tags=["search"])
@@ -14,6 +15,7 @@ async def universal_search(
     state: Optional[str] = None,
     status: Optional[str] = None,
     size: int = Query(default=50, le=200),
+    client_id: str = Depends(get_client_id),
 ) -> dict[str, Any]:
     ot_list = [ot.strip() for ot in object_types.split(",")] if object_types else None
     filters: dict[str, Any] = {}
@@ -25,7 +27,7 @@ async def universal_search(
         filters["riskScore_min"] = riskScore_min
 
     try:
-        results = await _es_store.search_objects(q, ot_list, filters, size)
+        results = await _es_store.search_objects(q, ot_list, filters, size, client_id)
     except Exception as e:
         return {"query": q, "results": [], "error": str(e), "total": 0}
 
@@ -40,11 +42,10 @@ async def universal_search(
 async def semantic_search(
     natural_language_query: str = Query(...),
     size: int = Query(default=20, le=100),
+    client_id: str = Depends(get_client_id),
 ) -> dict[str, Any]:
-    # Parse natural language intent into structured search
     query_lower = natural_language_query.lower()
 
-    # Extract hints from natural language
     object_types = None
     if "compan" in query_lower:
         object_types = ["company"]
@@ -64,7 +65,7 @@ async def semantic_search(
         filters["riskScore_min"] = 70
 
     try:
-        results = await _es_store.search_objects(natural_language_query, object_types, filters, size)
+        results = await _es_store.search_objects(natural_language_query, object_types, filters, size, client_id)
     except Exception as e:
         return {"query": natural_language_query, "results": [], "error": str(e)}
 

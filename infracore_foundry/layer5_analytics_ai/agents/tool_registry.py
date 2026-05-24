@@ -107,6 +107,28 @@ async def create_alert(entity_id: str, alert_type: str, message: str, actor_id: 
         return resp.json() if resp.status_code in (200, 201) else {"error": resp.status_code}
 
 
+@register_tool("search_documents", "Semantic search over indexed documents for a company entity")
+async def search_documents(query: str, entity_ref_id: str = None, top_k: int = 4, **_) -> list[dict]:
+    from rag.semantic_retriever import retrieve
+    return await retrieve(query, entity_ref_id=entity_ref_id, top_k=top_k)
+
+
+@register_tool("get_financial_statements", "Fetch financial statement history for a company")
+async def get_financial_statements(cin: str, years: int = 3, **_) -> list[dict]:
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(
+            f"{settings.layer3_api_url}/api/v1/objects/financial_statement",
+            params={"cin": cin, "limit": years, "period": "annual"},
+        )
+        return resp.json() if resp.status_code == 200 else []
+
+
+@register_tool("get_entity_features", "Get computed intelligence features for a company")
+async def get_entity_features(cin: str, **_) -> dict:
+    from feature_store.feature_computer import feature_computer
+    return await feature_computer.compute_company_features(cin)
+
+
 async def call_tool(tool_name: str, params: dict) -> Any:
     if tool_name not in TOOL_REGISTRY:
         raise ValueError(f"Unknown tool: {tool_name}")

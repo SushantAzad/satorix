@@ -1,4 +1,5 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@shared/api/client'
 import { LoadingSpinner } from '@shared/components/LoadingSpinner'
@@ -14,12 +15,36 @@ const REPORT_TYPES = [
 
 export function ReportCenter() {
   const qc = useQueryClient()
-  const [form, setForm] = useState({ entityType: 'company', entityId: '', reportType: 'corporate_due_diligence', depth: 'standard' })
+  const [searchParams] = useSearchParams()
+  const [form, setForm] = useState({ entityType: 'company', entityId: '', reportType: 'corporate_due_diligence' })
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    const entity = searchParams.get('entity')
+    if (entity && entity.includes('/')) {
+      const [type, ...idParts] = entity.split('/')
+      const id = idParts.join('/')
+      if (type && id) {
+        setForm(f => ({ ...f, entityType: type, entityId: id }))
+      }
+    }
+  }, [searchParams])
 
   const { data: reports, isLoading } = useQuery<Report[]>({
     queryKey: ['reports'],
-    queryFn: () => apiClient.get('/api/v1/reports').then(r => r.data),
+    queryFn: () => apiClient.get('/api/v1/reports').then(r => {
+      const list = Array.isArray(r.data) ? r.data : []
+      // Normalise backend field names to frontend Report type
+      return list.map((item: any) => ({
+        ...item,
+        id: item.id ?? item.report_id,
+        entityType: item.entityType ?? item.entity_type,
+        entityId: item.entityId ?? item.entity_id,
+        reportType: item.reportType ?? item.report_type,
+        generatedAt: item.generatedAt ?? item.generated_at,
+        status: item.status ?? 'completed',
+      })) as Report[]
+    }),
     staleTime: 30_000,
   })
 
@@ -28,13 +53,25 @@ export function ReportCenter() {
       entity_type: form.entityType,
       entity_id: form.entityId,
       report_type: form.reportType,
-      depth: form.depth,
     }).then(r => r.data),
-    onSuccess: () => {
+    onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ['reports'] })
-      setForm(f => ({ ...f, entityId: '' }))
+      if (data?.status === 'failed' || data?.error) {
+        setError(typeof data.error === 'string' ? data.error : 'Report generation failed — check Layer 5 is running.')
+      } else {
+        setForm(f => ({ ...f, entityId: '' }))
+      }
     },
-    onError: (e: any) => setError(e.response?.data?.detail || 'Generation failed'),
+    onError: (e: any) => {
+      const detail = e.response?.data?.detail
+      if (Array.isArray(detail)) {
+        setError(detail.map((d: any) => (typeof d === 'object' ? (d.msg || JSON.stringify(d)) : String(d))).join('; '))
+      } else if (typeof detail === 'string') {
+        setError(detail)
+      } else {
+        setError(e.message || 'Report generation failed')
+      }
+    },
   })
 
   const delMut = useMutation({

@@ -1,9 +1,13 @@
 """
 Structured extraction workflow (Type 2) — LLM reads unstructured documents and
 produces structured data written back to the ontology via the L3 Object Data Funnel.
+
+Ollama/local models often wrap JSON output in markdown code fences (```json ... ```).
+We strip these before validation so both Anthropic and Ollama responses work identically.
 """
 import json
 import logging
+import re
 
 import httpx
 
@@ -12,6 +16,13 @@ from llm.orchestrator import llm_orchestrator
 from llm.output_validator import validate_regulatory_action
 
 logger = logging.getLogger(__name__)
+
+
+def _strip_markdown_fences(text: str) -> str:
+    """Remove ```json ... ``` or ``` ... ``` wrappers that local models add."""
+    cleaned = re.sub(r"^```(?:json)?\s*", "", text.strip())
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    return cleaned.strip()
 
 
 async def extract_regulatory_action(
@@ -36,7 +47,10 @@ async def extract_regulatory_action(
         use_cache=False,
     )
 
-    validated, errors = validate_regulatory_action(raw)
+    # Strip markdown fences before validation — Ollama models frequently add them
+    raw_clean = _strip_markdown_fences(raw)
+
+    validated, errors = validate_regulatory_action(raw_clean)
 
     written = False
     if validated and not errors and write_to_ontology:
@@ -48,6 +62,7 @@ async def extract_regulatory_action(
         "validation_errors": errors,
         "written_to_ontology": written,
     }
+
 
 
 async def _write_regulatory_action_to_l3(data: dict, actor_id: str) -> bool:

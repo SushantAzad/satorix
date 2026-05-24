@@ -100,7 +100,9 @@ async def get_entity_profile(
             detail=f"entity_type must be one of: {sorted(_VALID_ENTITY_TYPES)}",
         )
 
-    cache_key = f"entity_profile:{entity_type}:{entity_id}"
+    client_id: str = current_user.get("client_id", "PLATFORM_GLOBAL")
+    # Cache key is scoped per tenant so clients never share cached profiles.
+    cache_key = f"entity_profile:{client_id}:{entity_type}:{entity_id}"
     cached = await get_cached(cache_key)
     if cached:
         # Still record the view even on cache hit
@@ -114,7 +116,7 @@ async def get_entity_profile(
         )
         return cached
 
-    profile = await build_entity_profile(layer_clients, entity_type, entity_id)
+    profile = await build_entity_profile(layer_clients, entity_type, entity_id, client_id=client_id)
 
     # Cache for 5 minutes
     await cache_response(cache_key, profile, ttl=300)

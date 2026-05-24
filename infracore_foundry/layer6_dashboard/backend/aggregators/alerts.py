@@ -79,13 +79,15 @@ async def get_alert_list(
     date_to: Optional[date] = None,
     limit: int = 50,
     offset: int = 0,
+    client_id: str = "PLATFORM_GLOBAL",
 ) -> Dict:
     """
     Return a filtered, sorted AlertListResponse dict.
     """
     raw_alerts = await clients.get_alerts(
         severity=severity,
-        limit=200,  # Fetch more than needed so we can filter locally
+        limit=200,
+        client_id=client_id,
     )
 
     # Apply local filters (L3 may not support all filter params)
@@ -112,11 +114,11 @@ async def get_alert_list(
     }
 
 
-async def get_alert_summary(clients: LayerClients) -> Dict:
+async def get_alert_summary(clients: LayerClients, client_id: str = "PLATFORM_GLOBAL") -> Dict:
     """
     Return aggregate counts: total, critical, high, medium, low, unacknowledged, new_today.
     """
-    raw_alerts = await clients.get_alerts(limit=500)
+    raw_alerts = await clients.get_alerts(limit=500, client_id=client_id)
 
     today = datetime.now(timezone.utc).date()
 
@@ -151,11 +153,15 @@ async def get_alert_summary(clients: LayerClients) -> Dict:
     }
 
 
-async def get_alert_detail(clients: LayerClients, alert_id: str) -> Optional[Dict]:
+async def get_alert_detail(
+    clients: LayerClients,
+    alert_id: str,
+    client_id: str = "PLATFORM_GLOBAL",
+) -> Optional[Dict]:
     """
     Return a detailed view of a single alert, enriched with entity context.
     """
-    alert = await clients.get_alert(alert_id)
+    alert = await clients.get_alert(alert_id, client_id=client_id)
     if alert is None:
         return None
 
@@ -164,7 +170,7 @@ async def get_alert_detail(clients: LayerClients, alert_id: str) -> Optional[Dic
     entity_id = alert.get("entity_id")
     entity_context: Optional[Dict] = None
     if entity_type and entity_id:
-        entity_context = await clients.get_entity(entity_type, entity_id)
+        entity_context = await clients.get_entity(entity_type, entity_id, client_id=client_id)
 
     shap_explanation = alert.get("shap_explanation") or alert.get("explanation")
     action_log = alert.get("action_log", [])

@@ -42,12 +42,13 @@ async def get_network(
             detail=f"entity_type must be one of: {sorted(_VALID_ENTITY_TYPES)}",
         )
 
-    cache_key = f"network:{entity_type}:{entity_id}:depth{depth}"
+    client_id: str = current_user.get("client_id", "PLATFORM_GLOBAL")
+    cache_key = f"network:{client_id}:{entity_type}:{entity_id}:depth{depth}"
     cached = await get_cached(cache_key)
     if cached:
         return cached
 
-    network = await build_network(layer_clients, entity_type, entity_id, depth=depth)
+    network = await build_network(layer_clients, entity_type, entity_id, depth=depth, client_id=client_id)
 
     # Cache for 10 minutes — network graphs are expensive to compute
     await cache_response(cache_key, network, ttl=600)

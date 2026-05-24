@@ -196,15 +196,33 @@ async def generate_report(
         return {
             "report_id": None,
             "status": "failed",
-            "error": "Layer 5 report service unavailable.",
+            "error": "Layer 5 report service unavailable. Ensure Layer 5 is running at port 8005.",
         }
 
     report_id = gen_result.get("report_id") or gen_result.get("id")
-    status = gen_result.get("status", "pending")
+    l5_status = gen_result.get("status", "pending")
+
+    # If Layer 5 returned a completed report synchronously, cache it immediately
+    if l5_status == "completed":
+        report_content = (
+            gen_result.get("report")
+            or gen_result.get("report_content")
+            or {k: v for k, v in gen_result.items() if k != "report_id"}
+        )
+        saved_id = await _save_report_cache(
+            db, user_id, entity_type, entity_id, report_type, report_content
+        )
+        return {
+            "report_id": saved_id,
+            "status": "completed",
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "report_type": report_type,
+        }
 
     return {
         "report_id": report_id,
-        "status": status,
+        "status": l5_status,
         "entity_type": entity_type,
         "entity_id": entity_id,
         "report_type": report_type,

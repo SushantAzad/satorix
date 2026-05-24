@@ -4,7 +4,7 @@ Cytoscape.js-compatible format for the frontend relationship explorer.
 """
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple  # noqa: F401
 
 from core.layer_clients import LayerClients
 
@@ -56,26 +56,37 @@ def _node_id(entity_type: str, entity_id: str) -> str:
     return f"{entity_type}:{entity_id}"
 
 
+_PK_FIELDS = ("cin", "din", "projectId", "actionId", "caseId", "cirpId",
+               "normalizedAddress", "bodyId", "entityId", "eventId", "alertId", "id")
+
+
 def _build_node(
     raw_node: Dict,
     centrality_map: Optional[Dict[str, float]] = None,
 ) -> Dict:
     """Convert a raw L3/L4 node dict into a Cytoscape node element."""
+    # Layer 3 Neo4j nodes store type in "object_type"; L4 uses "entityType"
     entity_type: str = (
         raw_node.get("entityType")
         or raw_node.get("entity_type")
-        or raw_node.get("labels", ["unknown"])[0].lower()
+        or raw_node.get("object_type")         # Neo4j node property
+        or (raw_node.get("labels", [""])[0].lower() if isinstance(raw_node.get("labels"), list) else "")
         or "unknown"
-    )
-    entity_id: str = (
-        raw_node.get("entityId")
-        or raw_node.get("entity_id")
-        or raw_node.get("id")
-        or "unknown"
-    )
+    ).lower()
+
+    # Find the primary key: try known PK fields in priority order
+    entity_id: str = raw_node.get("entityId") or raw_node.get("entity_id") or ""
+    if not entity_id:
+        for pk_field in _PK_FIELDS:
+            val = raw_node.get(pk_field)
+            if val:
+                entity_id = str(val)
+                break
+    entity_id = entity_id or "unknown"
     node_key = _node_id(entity_type, entity_id)
 
-    props: Dict = raw_node.get("properties", raw_node.get("data", {}))
+    # For Neo4j flat property nodes, there's no "properties" wrapper
+    props: Dict = raw_node.get("properties") or raw_node.get("data") or raw_node
     name: str = (
         props.get("name")
         or props.get("company_name")
@@ -86,9 +97,13 @@ def _build_node(
     label = name[:20] + ("…" if len(name) > 20 else "")
 
     risk_score: int = int(
-        props.get("risk_score", raw_node.get("riskScore", 0)) or 0
+        props.get("riskScore", props.get("risk_score", raw_node.get("riskScore", 0))) or 0
     )
-    risk_flags: List[str] = props.get("risk_flags", raw_node.get("riskFlags", []))
+    raw_flags = props.get("riskFlags", props.get("risk_flags", raw_node.get("riskFlags", [])))
+    if isinstance(raw_flags, str):
+        risk_flags: List[str] = [f for f in raw_flags.split(",") if f]
+    else:
+        risk_flags = list(raw_flags) if raw_flags else []
     is_anomalous: bool = any(
         a.get("severity") in ("HIGH", "CRITICAL")
         for a in raw_node.get("activeAlerts", [])
@@ -118,17 +133,30 @@ def _build_node(
 
 def _build_edge(raw_edge: Dict, idx: int) -> Dict:
     """Convert a raw L3/L4 edge dict into a Cytoscape edge element."""
+    # Prefer new L3 coalesce format (sourceLabel/sourcePK) over old Palantir-style fields
     source_type: str = (
-        raw_edge.get("sourceType", raw_edge.get("source_type", "unknown"))
+        raw_edge.get("sourceType")
+        or raw_edge.get("source_type")
+        or (raw_edge.get("sourceLabel", "").lower() or None)
+        or "unknown"
     )
     source_id: str = (
-        raw_edge.get("sourceId", raw_edge.get("source_id", raw_edge.get("source", "unknown")))
+        raw_edge.get("sourceId")
+        or raw_edge.get("source_id")
+        or raw_edge.get("sourcePK")
+        or str(raw_edge.get("source", "unknown"))
     )
     target_type: str = (
-        raw_edge.get("targetType", raw_edge.get("target_type", "unknown"))
+        raw_edge.get("targetType")
+        or raw_edge.get("target_type")
+        or (raw_edge.get("targetLabel", "").lower() or None)
+        or "unknown"
     )
     target_id: str = (
-        raw_edge.get("targetId", raw_edge.get("target_id", raw_edge.get("target", "unknown")))
+        raw_edge.get("targetId")
+        or raw_edge.get("target_id")
+        or raw_edge.get("targetPK")
+        or str(raw_edge.get("target", "unknown"))
     )
 
     source_key = _node_id(source_type, source_id)
@@ -159,6 +187,27 @@ def _build_edge(raw_edge: Dict, idx: int) -> Dict:
     }
 
 
+def _sanitize_graph(nodes: List[Dict], edges: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
+    """Remove edges whose source or target node ID is not present in the nodes list."""
+    node_ids = {n["data"]["id"] for n in nodes}
+    valid: List[Dict] = []
+    removed: List[Dict] = []
+    for edge in edges:
+        src = edge["data"].get("source", "")
+        tgt = edge["data"].get("target", "")
+        if src in node_ids and tgt in node_ids:
+            valid.append(edge)
+        else:
+            removed.append(edge)
+    if removed:
+        logger.warning(
+            "Dropped %d edges with missing nodes: %s",
+            len(removed),
+            [f"{e['data'].get('source')}→{e['data'].get('target')}" for e in removed[:5]],
+        )
+    return nodes, valid
+
+
 # ---------------------------------------------------------------------------
 # Fallback single-node network
 # ---------------------------------------------------------------------------
@@ -167,32 +216,27 @@ def _minimal_network(entity_type: str, entity_id: str) -> Dict:
     """Return a network containing only the requested entity (both layers failed)."""
     node_key = _node_id(entity_type, entity_id)
     return {
-        "entityType": entity_type,
-        "entityId": entity_id,
-        "elements": {
-            "nodes": [
-                {
-                    "data": {
-                        "id": node_key,
-                        "label": entity_id[:20],
-                        "entityType": entity_type,
-                        "riskScore": 0,
-                        "riskBand": "NONE",
-                        "riskFlags": [],
-                        "betweennessCentrality": 0.5,
-                        "isAnomalous": False,
-                        "properties": {},
-                        "size": 35.0,
-                    }
+        "nodes": [
+            {
+                "data": {
+                    "id": node_key,
+                    "label": entity_id[:20],
+                    "entityType": entity_type,
+                    "riskScore": 0,
+                    "riskBand": "NONE",
+                    "riskFlags": [],
+                    "betweennessCentrality": 0.5,
+                    "isAnomalous": False,
+                    "properties": {},
+                    "size": 35.0,
                 }
-            ],
-            "edges": [],
-        },
-        "stats": {
-            "nodeCount": 1,
-            "edgeCount": 0,
-            "depth": 0,
-            "source": "fallback",
+            }
+        ],
+        "edges": [],
+        "metadata": {
+            "entityCount": 1,
+            "relationshipCount": 0,
+            "maxDepth": 0,
         },
     }
 
@@ -206,14 +250,15 @@ async def build_network(
     entity_type: str,
     entity_id: str,
     depth: int = 2,
+    client_id: str = "PLATFORM_GLOBAL",
 ) -> Dict:
     """
     Fetch network data from Layer 4 (preferred) and Layer 3 (fallback),
     then convert to Cytoscape.js format.
     """
     l4_network, l3_network = await asyncio.gather(
-        clients.get_l4_network(entity_type, entity_id),
-        clients.get_network(entity_type, entity_id, depth),
+        clients.get_l4_network(entity_type, entity_id, client_id=client_id),
+        clients.get_network(entity_type, entity_id, depth, client_id=client_id),
         return_exceptions=False,
     )
 
@@ -270,17 +315,15 @@ async def build_network(
             },
         )
 
+    # Drop edges that reference a node not in the nodes list — Cytoscape.js will crash otherwise
+    cyto_nodes, cyto_edges = _sanitize_graph(cyto_nodes, cyto_edges)
+
     return {
-        "entityType": entity_type,
-        "entityId": entity_id,
-        "elements": {
-            "nodes": cyto_nodes,
-            "edges": cyto_edges,
-        },
-        "stats": {
-            "nodeCount": len(cyto_nodes),
-            "edgeCount": len(cyto_edges),
-            "depth": depth,
-            "source": source_label,
+        "nodes": cyto_nodes,
+        "edges": cyto_edges,
+        "metadata": {
+            "entityCount": len(cyto_nodes),
+            "relationshipCount": len(cyto_edges),
+            "maxDepth": depth,
         },
     }

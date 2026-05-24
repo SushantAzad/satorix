@@ -22,6 +22,7 @@ async def list_object_types(db: AsyncSession = Depends(get_db)) -> dict[str, Any
                 "description": t.description,
                 "primary_key_field": t.primary_key_field,
                 "interfaces": t.interfaces,
+                "properties": t.properties or [],
             }
             for t in types
         ],

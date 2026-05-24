@@ -11,7 +11,7 @@ PyMuPDF==1.23.6
 pytesseract==0.3.10
 Pillow==10.1.0
 python-docx==1.1.0
-httpx==0.25.2
+httpx>=0.27,<1
 requests==2.31.0
 boto3==1.29.0
 minio==7.2.0
@@ -43,5 +43,31 @@ shap==0.44.0
 scikit-learn==1.4.0
 scipy==1.12.0
 sentence-transformers==2.3.1
-anthropic==0.25.0
+anthropic>=0.40.0
 aioredis==2.0.1
+
+# LLM Provider Abstraction — provider.py calls Ollama via httpx directly (no ollama client pkg needed)
+
+# ── New connector dependencies ─────────────────────────────────────────────
+
+# Database connectors
+pymongo[srv]==4.6.1               # MongoDB (srv for Atlas connection strings)
+oracledb==2.0.1                   # Oracle Database (thin mode, no Oracle Client needed)
+pymssql==2.3.0                    # Microsoft SQL Server
+
+# CRM & SaaS
+simple-salesforce==1.12.5         # Salesforce
+redis==5.0.1                      # Redis client (replaces aioredis for sync use in connectors)
+
+# Cloud storage
+azure-storage-blob==12.19.0       # Azure Blob Storage
+dropbox==11.36.2                  # Dropbox SDK v2
+
+# Indian government APIs
+# (Sandbox.co.in APIs use httpx directly — no extra package needed)
+
+# Accounting
+# QuickBooks uses httpx directly (no intuit-oauth client package needed)
+
+# Note: google-api-python-client is NOT required — Google Drive connector
+# uses google-auth with httpx directly to avoid dependency conflicts.

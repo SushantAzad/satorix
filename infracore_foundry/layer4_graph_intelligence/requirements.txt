@@ -4,6 +4,7 @@ pydantic==2.5.0
 pydantic-settings==2.1.0
 
 # Database
+sqlalchemy[asyncio]==2.0.23
 asyncpg==0.29.0
 psycopg2-binary==2.9.9
 
@@ -17,7 +18,7 @@ elasticsearch==8.11.0
 redis[hiredis]==5.0.1
 
 # Kafka
-kafka-python==2.0.2
+kafka-python-ng==2.2.3
 
 # Anthropic (narrative generation + NL query parsing)
 anthropic==0.28.0

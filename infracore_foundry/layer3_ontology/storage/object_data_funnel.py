@@ -14,6 +14,7 @@ from sqlalchemy import text
 
 from core.database import AsyncSessionLocal
 from core.kafka_publisher import get_ontology_publisher
+from core.client_context import PLATFORM_GLOBAL
 from .event_store import EventStore, OntologyEvent
 from .neo4j_store import Neo4jStore
 from .elasticsearch_store import ElasticsearchStore
@@ -54,11 +55,14 @@ class ObjectDataFunnel:
         data: dict[str, Any],
         source: str,
         actor: str,
+        client_id: str = PLATFORM_GLOBAL,
     ) -> WriteResult:
         from core.database import AsyncSessionLocal
         async with AsyncSessionLocal() as db:
             try:
-                result = await self._write_object_internal(db, object_type, data, source, actor)
+                result = await self._write_object_internal(
+                    db, object_type, data, source, actor, client_id
+                )
                 await db.commit()
                 return result
             except Exception as e:
@@ -78,12 +82,13 @@ class ObjectDataFunnel:
         data: dict[str, Any],
         source: str,
         actor: str,
+        client_id: str = PLATFORM_GLOBAL,
     ) -> WriteResult:
         primary_key = self._extract_primary_key(object_type, data)
         data_hash = self._compute_hash(data)
 
-        # Check existing state
-        existing = await self._get_existing(db, object_type, primary_key)
+        # Check existing state — scoped to this client_id so tenants never collide.
+        existing = await self._get_existing(db, object_type, primary_key, client_id)
         is_new = existing is None
 
         if not is_new:
@@ -103,7 +108,9 @@ class ObjectDataFunnel:
         new_version = 1 if is_new else (existing.get("version", 1) + 1)
 
         # 1. Write to PostgreSQL (primary, authoritative)
-        await self._write_postgres(db, object_type, primary_key, data, data_hash, new_version)
+        await self._write_postgres(
+            db, object_type, primary_key, data, data_hash, new_version, client_id
+        )
 
         # 2. Emit events to event store
         if is_new:
@@ -130,13 +137,13 @@ class ObjectDataFunnel:
 
         # 3. Write to Neo4j (graph)
         try:
-            await self._neo4j_store.upsert_node(object_type, primary_key, data)
+            await self._neo4j_store.upsert_node(object_type, primary_key, data, client_id)
         except Exception as e:
             logger.error("Neo4j write failed for %s/%s: %s", object_type, primary_key, e)
 
         # 4. Write to Elasticsearch
         try:
-            await self._es_store.index_object(object_type, primary_key, data)
+            await self._es_store.index_object(object_type, primary_key, data, client_id)
         except Exception as e:
             logger.error("ES write failed for %s/%s: %s", object_type, primary_key, e)
 
@@ -172,11 +179,13 @@ class ObjectDataFunnel:
         properties: dict[str, Any],
         actor: str,
         is_inferred: bool = False,
+        client_id: str = PLATFORM_GLOBAL,
     ) -> WriteResult:
         async with AsyncSessionLocal() as db:
             try:
                 await self._write_link_postgres(
-                    db, link_type, source_type, source_id, target_type, target_id, properties, is_inferred
+                    db, link_type, source_type, source_id, target_type, target_id,
+                    properties, is_inferred, client_id,
                 )
                 await self._event_store.emit(db, OntologyEvent(
                     object_type=source_type,
@@ -196,7 +205,8 @@ class ObjectDataFunnel:
                 # Write to Neo4j
                 try:
                     await self._neo4j_store.upsert_relationship(
-                        link_type, source_type, source_id, target_type, target_id, properties
+                        link_type, source_type, source_id, target_type, target_id,
+                        properties, client_id,
                     )
                 except Exception as e:
                     logger.error("Neo4j link write failed: %s", e)
@@ -222,17 +232,20 @@ class ObjectDataFunnel:
         primary_key: str,
         actor: str,
         reason: str,
+        client_id: str = PLATFORM_GLOBAL,
     ) -> WriteResult:
-        """Soft delete — sets is_deleted=True, never hard deletes."""
+        """Soft delete — sets is_deleted=True, scoped to caller's client_id."""
         async with AsyncSessionLocal() as db:
             try:
                 await db.execute(
                     text("""
                         UPDATE ontology_objects
                         SET is_deleted = TRUE, updated_at = NOW()
-                        WHERE object_type = :object_type AND primary_key = :primary_key
+                        WHERE object_type = :object_type
+                          AND primary_key = :primary_key
+                          AND client_id = :client_id
                     """),
-                    {"object_type": object_type, "primary_key": primary_key},
+                    {"object_type": object_type, "primary_key": primary_key, "client_id": client_id},
                 )
                 await self._event_store.emit(db, OntologyEvent(
                     object_type=object_type,
@@ -250,16 +263,22 @@ class ObjectDataFunnel:
                 return WriteResult(success=False, object_type=object_type, object_id=primary_key, errors=[str(e)])
 
     async def _get_existing(
-        self, db: AsyncSession, object_type: str, primary_key: str
+        self,
+        db: AsyncSession,
+        object_type: str,
+        primary_key: str,
+        client_id: str = PLATFORM_GLOBAL,
     ) -> Optional[dict]:
         result = await db.execute(
             text("""
                 SELECT properties, data_hash, version
                 FROM ontology_objects
-                WHERE object_type = :object_type AND primary_key = :primary_key
+                WHERE object_type = :object_type
+                  AND primary_key = :primary_key
+                  AND client_id = :client_id
                   AND is_deleted = FALSE
             """),
-            {"object_type": object_type, "primary_key": primary_key},
+            {"object_type": object_type, "primary_key": primary_key, "client_id": client_id},
         )
         row = result.mappings().first()
         return dict(row) if row else None
@@ -272,13 +291,16 @@ class ObjectDataFunnel:
         data: dict,
         data_hash: str,
         version: int,
+        client_id: str = PLATFORM_GLOBAL,
     ) -> None:
         props_json = json.dumps(data, default=str)
         await db.execute(
             text("""
-                INSERT INTO ontology_objects (object_type, primary_key, properties, data_hash, version, updated_at)
-                VALUES (:object_type, :primary_key, :properties::jsonb, :data_hash, :version, NOW())
-                ON CONFLICT (object_type, primary_key) DO UPDATE
+                INSERT INTO ontology_objects
+                    (object_type, primary_key, properties, data_hash, version, client_id, updated_at)
+                VALUES
+                    (:object_type, :primary_key, :properties::jsonb, :data_hash, :version, :client_id, NOW())
+                ON CONFLICT (object_type, primary_key, client_id) DO UPDATE
                 SET properties = :properties::jsonb,
                     data_hash = :data_hash,
                     version = :version,
@@ -291,6 +313,7 @@ class ObjectDataFunnel:
                 "properties": props_json,
                 "data_hash": data_hash,
                 "version": version,
+                "client_id": client_id,
             },
         )
 
@@ -304,6 +327,7 @@ class ObjectDataFunnel:
         target_id: str,
         properties: dict,
         is_inferred: bool,
+        client_id: str = PLATFORM_GLOBAL,
     ) -> None:
         props_json = json.dumps(properties, default=str)
         inferred_by = properties.get("inferredBy")
@@ -312,10 +336,12 @@ class ObjectDataFunnel:
             text("""
                 INSERT INTO ontology_links
                     (link_type, source_type, source_id, target_type, target_id,
-                     properties, is_inferred, inferred_by, inference_confidence, updated_at)
+                     properties, is_inferred, inferred_by, inference_confidence,
+                     client_id, updated_at)
                 VALUES
                     (:link_type, :source_type, :source_id, :target_type, :target_id,
-                     :properties::jsonb, :is_inferred, :inferred_by, :confidence, NOW())
+                     :properties::jsonb, :is_inferred, :inferred_by, :confidence,
+                     :client_id, NOW())
                 ON CONFLICT DO NOTHING
             """),
             {
@@ -328,6 +354,7 @@ class ObjectDataFunnel:
                 "is_inferred": is_inferred,
                 "inferred_by": inferred_by,
                 "confidence": confidence,
+                "client_id": client_id,
             },
         )
 
@@ -345,6 +372,8 @@ class ObjectDataFunnel:
             "government_entity": "entityId",
             "event": "eventId",
             "alert": "alertId",
+            "financial_statement": "statement_id",
+            "document": "doc_id",
         }
         pk_field = pk_fields.get(object_type.lower(), "id")
         pk_value = data.get(pk_field) or data.get("primary_key") or data.get("id", "")

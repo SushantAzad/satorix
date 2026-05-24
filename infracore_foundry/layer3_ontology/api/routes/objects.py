@@ -4,6 +4,7 @@ from sqlalchemy import text
 from typing import Any, Optional
 import json
 from core.database import get_db
+from core.client_context import get_client_id, PLATFORM_GLOBAL
 from storage.object_data_funnel import object_data_funnel
 from storage.cache_store import CacheStore
 from dynamic.object_security import object_security_filter
@@ -23,15 +24,27 @@ async def list_objects(
     offset: int = Query(default=0, ge=0),
     actor_role: str = Query(default="analyst"),
     db: AsyncSession = Depends(get_db),
+    client_id: str = Depends(get_client_id),
 ) -> dict[str, Any]:
-    conditions = ["object_type = :ot", "is_deleted = FALSE"]
-    params: dict[str, Any] = {"ot": object_type.lower(), "limit": limit, "offset": offset}
+    # Return objects owned by this client OR PLATFORM_GLOBAL public data.
+    conditions = [
+        "object_type = :ot",
+        "is_deleted = FALSE",
+        "(client_id = :cid OR client_id = :pg)",
+    ]
+    params: dict[str, Any] = {
+        "ot": object_type.lower(),
+        "cid": client_id,
+        "pg": PLATFORM_GLOBAL,
+        "limit": limit,
+        "offset": offset,
+    }
 
     if status:
         conditions.append("properties->>'status' = :status")
         params["status"] = status
     if state:
-        conditions.append("properties->>'registeredState' = :state OR properties->>'state' = :state")
+        conditions.append("(properties->>'registeredState' = :state OR properties->>'state' = :state)")
         params["state"] = state
     if riskScore_min is not None:
         conditions.append("(properties->>'riskScore')::int >= :rs_min")
@@ -42,7 +55,11 @@ async def list_objects(
 
     where_clause = " AND ".join(conditions)
     result = await db.execute(
-        text(f"SELECT primary_key, properties, version, updated_at FROM ontology_objects WHERE {where_clause} ORDER BY updated_at DESC LIMIT :limit OFFSET :offset"),
+        text(
+            f"SELECT primary_key, properties, version, updated_at "
+            f"FROM ontology_objects WHERE {where_clause} "
+            f"ORDER BY updated_at DESC LIMIT :limit OFFSET :offset"
+        ),
         params,
     )
     rows = result.fetchall()
@@ -58,9 +75,10 @@ async def list_objects(
             **filtered,
         })
 
+    count_params = {k: v for k, v in params.items() if k not in ("limit", "offset")}
     count_result = await db.execute(
         text(f"SELECT COUNT(*) FROM ontology_objects WHERE {where_clause}"),
-        {k: v for k, v in params.items() if k not in ("limit", "offset")},
+        count_params,
     )
     total = count_result.scalar() or 0
 
@@ -73,14 +91,20 @@ async def get_object(
     primary_key: str,
     actor_role: str = Query(default="analyst"),
     db: AsyncSession = Depends(get_db),
+    client_id: str = Depends(get_client_id),
 ) -> dict[str, Any]:
     cached = await _cache.get(object_type, primary_key)
     if cached:
         return object_security_filter.filter_object(object_type, cached, actor_role)
 
     result = await db.execute(
-        text("SELECT properties, version, updated_at FROM ontology_objects WHERE object_type = :ot AND primary_key = :pk AND is_deleted = FALSE"),
-        {"ot": object_type.lower(), "pk": primary_key},
+        text(
+            "SELECT properties, version, updated_at FROM ontology_objects "
+            "WHERE object_type = :ot AND primary_key = :pk "
+            "AND (client_id = :cid OR client_id = :pg) "
+            "AND is_deleted = FALSE"
+        ),
+        {"ot": object_type.lower(), "pk": primary_key, "cid": client_id, "pg": PLATFORM_GLOBAL},
     )
     row = result.first()
     if not row:
@@ -100,12 +124,14 @@ async def create_object(
     data: dict[str, Any],
     actor_id: str = Query(default="anonymous"),
     actor_role: str = Query(default="data_steward"),
+    client_id: str = Depends(get_client_id),
 ) -> dict[str, Any]:
     result = await object_data_funnel.write_object(
         object_type=object_type,
         data=data,
         source="user_api",
         actor=actor_id,
+        client_id=client_id,
     )
     if not result.success:
         raise HTTPException(status_code=422, detail=result.errors)
@@ -120,10 +146,16 @@ async def update_object(
     actor_id: str = Query(default="anonymous"),
     actor_role: str = Query(default="data_steward"),
     db: AsyncSession = Depends(get_db),
+    client_id: str = Depends(get_client_id),
 ) -> dict[str, Any]:
     result_row = await db.execute(
-        text("SELECT properties FROM ontology_objects WHERE object_type = :ot AND primary_key = :pk AND is_deleted = FALSE"),
-        {"ot": object_type.lower(), "pk": primary_key},
+        text(
+            "SELECT properties FROM ontology_objects "
+            "WHERE object_type = :ot AND primary_key = :pk "
+            "AND (client_id = :cid OR client_id = :pg) "
+            "AND is_deleted = FALSE"
+        ),
+        {"ot": object_type.lower(), "pk": primary_key, "cid": client_id, "pg": PLATFORM_GLOBAL},
     )
     row = result_row.first()
     if not row:
@@ -137,6 +169,7 @@ async def update_object(
         data=merged,
         source="user_api:update",
         actor=actor_id,
+        client_id=client_id,
     )
     if not result.success:
         raise HTTPException(status_code=422, detail=result.errors)
@@ -150,6 +183,7 @@ async def delete_object(
     reason: str = Query(default="Deleted by administrator"),
     actor_id: str = Query(default="anonymous"),
     actor_role: str = Query(default="platform_administrator"),
+    client_id: str = Depends(get_client_id),
 ) -> dict[str, Any]:
     if actor_role.lower() != "platform_administrator":
         raise HTTPException(status_code=403, detail="Only PLATFORM_ADMINISTRATOR can delete objects")
@@ -158,6 +192,7 @@ async def delete_object(
         primary_key=primary_key,
         actor=actor_id,
         reason=reason,
+        client_id=client_id,
     )
     if not result.success:
         raise HTTPException(status_code=422, detail=result.errors)

@@ -41,7 +41,8 @@ async def alerts_summary(
     current_user: Dict = Depends(get_current_user),
 ) -> Dict:
     """Return aggregate alert counts: total, critical, high, medium, low, unacknowledged, new_today."""
-    return await get_alert_summary(layer_clients)
+    client_id: str = current_user.get("client_id", "PLATFORM_GLOBAL")
+    return await get_alert_summary(layer_clients, client_id=client_id)
 
 
 @router.get("/")
@@ -57,6 +58,7 @@ async def list_alerts(
     current_user: Dict = Depends(get_current_user),
 ) -> Dict:
     """Return filtered and sorted alert list."""
+    client_id: str = current_user.get("client_id", "PLATFORM_GLOBAL")
     return await get_alert_list(
         layer_clients,
         severity=severity,
@@ -67,6 +69,7 @@ async def list_alerts(
         date_to=date_to,
         limit=limit,
         offset=offset,
+        client_id=client_id,
     )
 
 
@@ -76,7 +79,8 @@ async def get_alert(
     current_user: Dict = Depends(get_current_user),
 ) -> Dict:
     """Return alert detail with entity context, SHAP explanation, and action log."""
-    detail = await get_alert_detail(layer_clients, alert_id)
+    client_id: str = current_user.get("client_id", "PLATFORM_GLOBAL")
+    detail = await get_alert_detail(layer_clients, alert_id, client_id=client_id)
     if detail is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -94,6 +98,7 @@ async def acknowledge_alert(
     ),
 ) -> Dict:
     """Mark an alert as acknowledged by the current user."""
+    client_id: str = current_user.get("client_id", "PLATFORM_GLOBAL")
     try:
         resp = await layer_clients.l3_client.patch(
             f"/intelligence/alerts/{alert_id}/acknowledge",
@@ -102,6 +107,7 @@ async def acknowledge_alert(
                 "acknowledged_by_id": current_user.get("sub"),
                 "notes": body.notes,
             },
+            headers={"X-Client-ID": client_id},
         )
         if resp.status_code == 404:
             raise HTTPException(
@@ -141,6 +147,7 @@ async def assign_alert(
     ),
 ) -> Dict:
     """Assign an alert to a team member."""
+    client_id: str = current_user.get("client_id", "PLATFORM_GLOBAL")
     try:
         resp = await layer_clients.l3_client.patch(
             f"/intelligence/alerts/{alert_id}/assign",
@@ -149,6 +156,7 @@ async def assign_alert(
                 "assigned_by": current_user.get("email"),
                 "notes": body.notes,
             },
+            headers={"X-Client-ID": client_id},
         )
         if resp.status_code >= 400:
             return {

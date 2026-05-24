@@ -14,6 +14,7 @@ from core.neo4j_client import neo4j_client
 from core.elasticsearch_client import es_client
 from core.redis_client import redis_client
 from core.minio_client import minio_client
+from storage.neo4j_store import Neo4jStore
 from api.routes import objects, search, graph, intelligence, actions, timeline, health, ingest, schema
 
 logging.basicConfig(
@@ -34,11 +35,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("PostgreSQL init failed: %s", e)
 
+    # Run multi-tenancy migration (idempotent — ADD COLUMN IF NOT EXISTS)
+    try:
+        await _run_client_isolation_migration()
+    except Exception as e:
+        logger.error("Client isolation migration failed: %s", e)
+
     # Initialize Neo4j
     try:
         await neo4j_client.connect()
     except Exception as e:
         logger.error("Neo4j connect failed: %s", e)
+
+    # Bootstrap Neo4j clientId indexes
+    try:
+        await Neo4jStore().setup_indexes()
+    except Exception as e:
+        logger.error("Neo4j index setup failed: %s", e)
 
     # Initialize Elasticsearch
     try:
@@ -76,6 +89,38 @@ async def lifespan(app: FastAPI):
     logger.info("Layer 3 API shutdown complete")
 
 
+async def _run_client_isolation_migration() -> None:
+    """Apply migration 002 — adds client_id column if it does not exist yet.
+
+    Safe to run on every startup (all statements use IF NOT EXISTS / IF EXISTS).
+    """
+    from core.database import AsyncSessionLocal
+    from sqlalchemy import text
+
+    stmts = [
+        # ontology_objects
+        "ALTER TABLE ontology_objects ADD COLUMN IF NOT EXISTS client_id VARCHAR(100) NOT NULL DEFAULT 'PLATFORM_GLOBAL'",
+        "ALTER TABLE ontology_objects DROP CONSTRAINT IF EXISTS ontology_objects_object_type_primary_key_key",
+        # PostgreSQL does not support IF NOT EXISTS on ADD CONSTRAINT, so we guard with a
+        # do-nothing insert into information_schema inside a function — instead use a plain
+        # CREATE UNIQUE INDEX which does support IF NOT EXISTS.
+        "CREATE UNIQUE INDEX IF NOT EXISTS ontology_objects_tenant_pk_unique ON ontology_objects (object_type, primary_key, client_id)",
+        "CREATE INDEX IF NOT EXISTS idx_objects_client_id ON ontology_objects (client_id)",
+        "CREATE INDEX IF NOT EXISTS idx_objects_type_client ON ontology_objects (object_type, client_id)",
+        # ontology_links
+        "ALTER TABLE ontology_links ADD COLUMN IF NOT EXISTS client_id VARCHAR(100) NOT NULL DEFAULT 'PLATFORM_GLOBAL'",
+        "CREATE INDEX IF NOT EXISTS idx_links_client_id ON ontology_links (client_id)",
+    ]
+    async with AsyncSessionLocal() as db:
+        for stmt in stmts:
+            try:
+                await db.execute(text(stmt))
+            except Exception as exc:
+                logger.debug("Migration stmt skipped (%s…): %s", stmt[:60], exc)
+        await db.commit()
+    logger.info("Client isolation migration applied")
+
+
 async def _seed_schema() -> None:
     """Seed object type and link type definitions into the schema registry."""
     from core.database import AsyncSessionLocal
@@ -93,17 +138,21 @@ async def _seed_schema() -> None:
     from semantic.object_types.government_entity import GOVERNMENT_ENTITY_DEFINITION
     from semantic.object_types.event import EVENT_DEFINITION
     from semantic.object_types.alert import ALERT_DEFINITION
+    from semantic.object_types.financial_statement import FINANCIAL_STATEMENT_DEFINITION
+    from semantic.object_types.document import DOCUMENT_DEFINITION
     from semantic.link_types.corporate import ALL_CORPORATE_LINKS
     from semantic.link_types.regulatory import ALL_REGULATORY_LINKS
     from semantic.link_types.project import ALL_PROJECT_LINKS
+    from semantic.link_types.financial import ALL_FINANCIAL_LINK_TYPES
 
     object_type_definitions = [
         COMPANY_DEFINITION, DIRECTOR_DEFINITION, PROJECT_DEFINITION,
         REGULATORY_ACTION_DEFINITION, LEGAL_CASE_DEFINITION, INSOLVENCY_PROCEEDING_DEFINITION,
         ADDRESS_DEFINITION, REGULATORY_BODY_DEFINITION, GOVERNMENT_ENTITY_DEFINITION,
         EVENT_DEFINITION, ALERT_DEFINITION,
+        FINANCIAL_STATEMENT_DEFINITION, DOCUMENT_DEFINITION,
     ]
-    link_definitions = ALL_CORPORATE_LINKS + ALL_REGULATORY_LINKS + ALL_PROJECT_LINKS
+    link_definitions = ALL_CORPORATE_LINKS + ALL_REGULATORY_LINKS + ALL_PROJECT_LINKS + ALL_FINANCIAL_LINK_TYPES
 
     async with AsyncSessionLocal() as db:
         for defn in object_type_definitions:

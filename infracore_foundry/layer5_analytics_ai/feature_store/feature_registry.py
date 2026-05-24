@@ -33,6 +33,16 @@ COMPANY_FEATURES: list[FeatureDef] = [
     FeatureDef("is_under_cirp", "Company", "1 if company is currently under CIRP", "bool", 0.0),
     FeatureDef("has_legal_case", "Company", "1 if active legal case exists", "bool", 0.0),
     FeatureDef("total_project_value_cr", "Company", "Total project portfolio value in Cr INR", "float", 0.0),
+    # Business intelligence features (requires FinancialStatement data)
+    FeatureDef("revenue_cagr_3y", "Company", "Revenue CAGR over last 3 fiscal years (%)", "float", None),
+    FeatureDef("ebitda_margin_latest", "Company", "EBITDA margin from most recent annual statement (%)", "float", None),
+    FeatureDef("debt_service_coverage_latest", "Company", "DSCR from most recent financial statement", "float", None),
+    FeatureDef("working_capital_days", "Company", "Working capital as days of revenue", "float", None),
+    FeatureDef("related_party_tx_ratio", "Company", "Related-party transactions as % of revenue", "float", 0.0),
+    FeatureDef("financial_statement_years", "Company", "Number of fiscal years with ingested financial data", "int", 0.0),
+    FeatureDef("revenue_latest_cr", "Company", "Revenue from most recent annual statement (INR Cr)", "float", None),
+    FeatureDef("total_debt_latest_cr", "Company", "Total debt from most recent annual statement (INR Cr)", "float", None),
+    FeatureDef("document_count", "Company", "Number of indexed documents available for RAG", "int", 0.0),
 ]
 
 PROJECT_FEATURES: list[FeatureDef] = [

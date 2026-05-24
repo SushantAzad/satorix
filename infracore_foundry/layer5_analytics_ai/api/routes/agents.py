@@ -4,8 +4,8 @@ from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel
 from typing import Optional
 
-from agents.agents.due_diligence import DueDiligenceAgent
-from agents.agents.entity_resolution import EntityResolutionAgent
+from agents.agent_engine import AgentExecutionEngine
+from agents.graph_intelligence_agent import graph_intelligence_agent
 from core.database import get_pool
 
 router = APIRouter(prefix="/agents", tags=["agents"])
@@ -20,17 +20,50 @@ class EntityResolutionRequest(BaseModel):
     cin: str
 
 
+class IntelligenceQueryRequest(BaseModel):
+    question: str
+    cin: Optional[str] = None   # optional entity context
+
+
+@router.post("/intelligence/query")
+async def run_intelligence_query(
+    request: IntelligenceQueryRequest,
+    x_actor_id: Optional[str] = Header(default="api_user"),
+):
+    """
+    Open-ended corporate intelligence question answered by the GraphIntelligenceAgent.
+    Uses a multi-step tool-use reasoning loop grounded in the knowledge graph.
+    """
+    result = await graph_intelligence_agent.run(
+        input_params={
+            "question": request.question,
+            "cin": request.cin or "",
+            "actor_id": x_actor_id or "api_user",
+        },
+        actor_id=x_actor_id or "api_user",
+    )
+    return {
+        "answer": result.get("output", ""),
+        "run_id": result.get("run_id"),
+        "status": result.get("status"),
+    }
+
+
 @router.post("/due-diligence")
 async def run_due_diligence(
     request: DueDiligenceRequest,
     x_actor_id: Optional[str] = Header(default="api_user"),
 ):
-    agent = DueDiligenceAgent()
-    result = await agent.run(
-        input_params={"cin": request.cin, "depth": request.depth},
-        actor_id=x_actor_id or "api_user",
-    )
-    return result
+    try:
+        from agents.agents.due_diligence import DueDiligenceAgent
+        agent = DueDiligenceAgent()
+        result = await agent.run(
+            input_params={"cin": request.cin, "depth": request.depth},
+            actor_id=x_actor_id or "api_user",
+        )
+        return result
+    except ImportError:
+        raise HTTPException(status_code=501, detail="DueDiligenceAgent not available")
 
 
 @router.post("/entity-resolution")
@@ -38,12 +71,16 @@ async def run_entity_resolution(
     request: EntityResolutionRequest,
     x_actor_id: Optional[str] = Header(default="api_user"),
 ):
-    agent = EntityResolutionAgent()
-    result = await agent.run(
-        input_params={"cin": request.cin},
-        actor_id=x_actor_id or "api_user",
-    )
-    return result
+    try:
+        from agents.agents.entity_resolution import EntityResolutionAgent
+        agent = EntityResolutionAgent()
+        result = await agent.run(
+            input_params={"cin": request.cin},
+            actor_id=x_actor_id or "api_user",
+        )
+        return result
+    except ImportError:
+        raise HTTPException(status_code=501, detail="EntityResolutionAgent not available")
 
 
 @router.get("/runs/{run_id}")

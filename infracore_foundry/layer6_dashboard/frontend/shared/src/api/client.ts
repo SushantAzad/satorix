@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { useAuthStore } from '../store/authStore'
 
 const API_URL = typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_URL || 'http://localhost:8006'
 
@@ -14,12 +15,18 @@ apiClient.interceptors.request.use((config) => {
   return config
 })
 
+let _redirectingToLogin = false
+
 apiClient.interceptors.response.use(
   (res) => res,
   (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('satorix_token')
-      if (typeof window !== 'undefined') window.location.href = '/login'
+    if (error.response?.status === 401 && !_redirectingToLogin) {
+      _redirectingToLogin = true
+      useAuthStore.getState().clearAuth()
+      if (typeof window !== 'undefined') {
+        const returnTo = window.location.pathname + window.location.search
+        window.location.href = returnTo === '/login' ? '/login' : `/login?from=${encodeURIComponent(returnTo)}`
+      }
     }
     return Promise.reject(error)
   }

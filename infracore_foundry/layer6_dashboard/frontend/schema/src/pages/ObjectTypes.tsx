@@ -6,6 +6,21 @@ import clsx from 'clsx'
 
 const NEO4J_BROWSER_URL = 'http://localhost:7474'
 
+const NEO4J_LABEL_MAP: Record<string, string> = {
+  company: 'Company',
+  director: 'Director',
+  project: 'Project',
+  address: 'Address',
+  regulatory_action: 'RegulatoryAction',
+  legal_case: 'LegalCase',
+  insolvency_proceeding: 'InsolvencyProceeding',
+  alert: 'Alert',
+  event: 'Event',
+  regulatory_body: 'RegulatoryBody',
+  government_entity: 'GovernmentEntity',
+  contract: 'Contract',
+}
+
 const OBJECT_TYPES = [
   'company',
   'director',
@@ -32,8 +47,8 @@ interface PropertyDef {
 interface ObjectTypeData {
   name: string
   display_name: string
-  property_count: number
-  instance_count: number
+  property_count: number | null
+  instance_count: number | null
   last_modified: string
   properties: PropertyDef[]
 }
@@ -49,8 +64,8 @@ function buildFallback(): ObjectTypeData[] {
     display_name: name
       .replace(/_/g, ' ')
       .replace(/\b\w/g, c => c.toUpperCase()),
-    property_count: 0,
-    instance_count: 0,
+    property_count: null,
+    instance_count: null,
     last_modified: '—',
     properties: [],
   }))
@@ -133,14 +148,16 @@ export default function ObjectTypes() {
                       <span className="font-mono text-sm font-medium text-gray-900">{ot.name}</span>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">{ot.display_name}</td>
-                    <td className="px-4 py-3 text-sm tabular-nums text-gray-700">{ot.property_count || '—'}</td>
                     <td className="px-4 py-3 text-sm tabular-nums text-gray-700">
-                      {ot.instance_count > 0 ? ot.instance_count.toLocaleString() : '—'}
+                      {ot.property_count != null ? ot.property_count : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-sm tabular-nums text-gray-700">
+                      {ot.instance_count != null ? ot.instance_count.toLocaleString() : '—'}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-500">{ot.last_modified}</td>
                     <td className="px-4 py-3">
                       <a
-                        href={`${NEO4J_BROWSER_URL}/browser/?cmd=edit&arg=MATCH (n:${ot.name}) RETURN n LIMIT 25`}
+                        href={`${NEO4J_BROWSER_URL}/browser/?cmd=edit&arg=MATCH (n:${NEO4J_LABEL_MAP[ot.name] ?? ot.display_name.replace(/\s/g, '')}) RETURN n LIMIT 25`}
                         target="_blank"
                         rel="noreferrer"
                         onClick={e => e.stopPropagation()}

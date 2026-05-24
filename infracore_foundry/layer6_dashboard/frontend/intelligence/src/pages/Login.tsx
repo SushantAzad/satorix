@@ -11,7 +11,8 @@ export function Login() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  const from = (loc.state as any)?.from?.pathname || '/'
+  const params = new URLSearchParams(loc.search)
+  const from = (loc.state as any)?.from?.pathname || params.get('from') || '/'
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

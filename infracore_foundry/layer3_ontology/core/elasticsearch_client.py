@@ -5,11 +5,16 @@ from .config import settings
 
 logger = logging.getLogger(__name__)
 
+PLATFORM_GLOBAL = "PLATFORM_GLOBAL"
+
 OBJECT_TYPE_INDICES = [
     "company", "director", "project", "regulatory_action",
     "legal_case", "insolvency_proceeding", "address",
     "regulatory_body", "government_entity", "event", "alert",
 ]
+
+# clientId field is included in every index so tenant-scoped searches are O(1).
+_CLIENT_ID_FIELD: dict = {"clientId": {"type": "keyword"}}
 
 INDEX_MAPPINGS: dict[str, dict] = {
     "company": {
@@ -24,6 +29,7 @@ INDEX_MAPPINGS: dict[str, dict] = {
                 "industry": {"type": "text"},
                 "registeredAddress": {"type": "text"},
                 "lastUpdated": {"type": "date"},
+                **_CLIENT_ID_FIELD,
             }
         }
     },
@@ -37,6 +43,7 @@ INDEX_MAPPINGS: dict[str, dict] = {
                 "disqualificationStatus": {"type": "keyword"},
                 "riskScore": {"type": "integer"},
                 "isOffshore": {"type": "boolean"},
+                **_CLIENT_ID_FIELD,
             }
         }
     },
@@ -49,6 +56,7 @@ INDEX_MAPPINGS: dict[str, dict] = {
                 "state": {"type": "keyword"},
                 "projectType": {"type": "keyword"},
                 "riskScore": {"type": "integer"},
+                **_CLIENT_ID_FIELD,
             }
         }
     },
@@ -60,6 +68,7 @@ INDEX_MAPPINGS: dict[str, dict] = {
                 "actionType": {"type": "keyword"},
                 "status": {"type": "keyword"},
                 "description": {"type": "text"},
+                **_CLIENT_ID_FIELD,
             }
         }
     },
@@ -73,6 +82,7 @@ INDEX_MAPPINGS: dict[str, dict] = {
                 "message": {"type": "text"},
                 "isActive": {"type": "boolean"},
                 "createdAt": {"type": "date"},
+                **_CLIENT_ID_FIELD,
             }
         }
     },
@@ -115,11 +125,18 @@ class ElasticsearchClient:
     def index_name(self, object_type: str) -> str:
         return f"ontology_{object_type.lower()}"
 
-    async def index_document(self, object_type: str, doc_id: str, body: dict[str, Any]) -> None:
+    async def index_document(
+        self,
+        object_type: str,
+        doc_id: str,
+        body: dict[str, Any],
+        client_id: str = PLATFORM_GLOBAL,
+    ) -> None:
+        document = {**body, "clientId": client_id}
         await self.client.index(
             index=self.index_name(object_type),
             id=doc_id,
-            document=body,
+            document=document,
         )
 
     async def search(
@@ -128,6 +145,7 @@ class ElasticsearchClient:
         object_types: list[str] | None = None,
         filters: dict[str, Any] | None = None,
         size: int = 50,
+        client_id: str = PLATFORM_GLOBAL,
     ) -> list[dict[str, Any]]:
         indices = (
             [self.index_name(ot) for ot in object_types]
@@ -146,7 +164,18 @@ class ElasticsearchClient:
             }
         ]
 
-        filter_clauses: list[dict] = []
+        # Tenant isolation: match caller's clientId OR PLATFORM_GLOBAL documents.
+        filter_clauses: list[dict] = [
+            {
+                "bool": {
+                    "should": [
+                        {"term": {"clientId": client_id}},
+                        {"term": {"clientId": PLATFORM_GLOBAL}},
+                    ],
+                    "minimum_should_match": 1,
+                }
+            }
+        ]
         if filters:
             for field, value in filters.items():
                 if value is not None:

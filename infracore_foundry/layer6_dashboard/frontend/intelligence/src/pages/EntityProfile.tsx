@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Download, Flag, FileText, ArrowLeft } from 'lucide-react'
+import { Download, Flag, FileText, ArrowLeft, Brain } from 'lucide-react'
 import { entitiesApi } from '@shared/api/entities'
 import { useEntityStore } from '@shared/store/entityStore'
 import { RiskBadge } from '@shared/components/RiskBadge'
@@ -98,6 +98,12 @@ export function EntityProfile() {
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors">
                 <FileText className="h-3.5 w-3.5" /><span>Due Diligence</span>
               </Link>
+              {entityType === 'company' && (
+                <Link to={`/intelligence/${entityId}`}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors">
+                  <Brain className="h-3.5 w-3.5" /><span>Intelligence</span>
+                </Link>
+              )}
               <div className="flex gap-2">
                 <button className="flex items-center gap-1 px-3 py-1.5 border border-gray-300 text-sm text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
                   <Flag className="h-3.5 w-3.5" /><span>Flag</span>
@@ -143,7 +149,7 @@ export function EntityProfile() {
         <div className="flex items-center justify-between mb-4">
           <div>
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Entity Network</p>
-            <p className="text-xs text-gray-400 mt-0.5">2-degree connections · {network?.metadata.entityCount ?? 0} entities · {network?.metadata.relationshipCount ?? 0} relationships</p>
+            <p className="text-xs text-gray-400 mt-0.5">2-degree connections · {network?.metadata?.entityCount ?? 0} entities · {network?.metadata?.relationshipCount ?? 0} relationships</p>
           </div>
           <Link to={`/network/${entityType}/${entityId}`} className="text-xs text-gray-500 hover:text-gray-900 border border-gray-300 px-2 py-1 rounded-lg transition-colors">
             Expand →
@@ -153,9 +159,9 @@ export function EntityProfile() {
           <div className="h-96 bg-gray-50 rounded-xl animate-pulse flex items-center justify-center">
             <span className="text-sm text-gray-400">Loading network...</span>
           </div>
-        ) : network && network.nodes.length > 0 ? (
+        ) : network && (network.nodes?.length ?? 0) > 0 ? (
           <div className="h-96 border border-gray-200 rounded-xl overflow-hidden">
-            <NetworkGraph nodes={network.nodes} edges={network.edges} />
+            <NetworkGraph nodes={network.nodes ?? []} edges={network.edges ?? []} />
           </div>
         ) : (
           <div className="h-48 bg-gray-50 rounded-xl flex items-center justify-center border border-gray-200">
@@ -175,7 +181,7 @@ export function EntityProfile() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-0.5">
                     <AlertBadge severity={a.severity} />
-                    <span className="text-xs text-gray-400">{formatDistanceToNow(parseISO(a.createdAt), { addSuffix: true })}</span>
+                    <span className="text-xs text-gray-400">{a.createdAt ? formatDistanceToNow(parseISO(a.createdAt), { addSuffix: true }) : ''}</span>
                   </div>
                   <p className="text-sm font-medium text-gray-900">{a.title}</p>
                   <p className="text-xs text-gray-500 mt-0.5">{a.message}</p>

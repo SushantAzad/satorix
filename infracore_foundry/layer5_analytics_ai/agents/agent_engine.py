@@ -1,11 +1,16 @@
 """
 AgentExecutionEngine — base class for all Layer 5 agents.
 Provides the step-by-step execution loop with guardrail checking and trace logging.
+
+Subclasses that need LLM calls should use self._get_llm_provider() rather than
+instantiating providers directly. This ensures runtime provider switching works.
 """
 import logging
 import time
 from abc import ABC, abstractmethod
 from typing import Any, Optional
+
+from shared.llm.provider import get_llm_provider, BaseLLMProvider, LLMMessage
 
 from agents.guardrails import GuardrailConfig, GuardrailViolation, check_guardrails
 from agents.trace_logger import AgentTraceLogger
@@ -85,4 +90,13 @@ class AgentExecutionEngine(ABC):
         """Return list of {tool, params, result_key} dicts defining execution steps."""
 
     async def build_output(self, results: dict, input_params: dict) -> str:
+        """
+        Generate a final output summary.
+        Subclasses can override this and use self._get_llm_provider() to generate
+        LLM-powered summaries of the agent's execution results.
+        """
         return f"Agent {self.agent_type} completed with {len(results)} steps"
+
+    def _get_llm_provider(self) -> BaseLLMProvider:
+        """Returns the active LLM provider. Resolved at call time — never cached."""
+        return get_llm_provider()

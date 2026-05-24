@@ -1,32 +1,30 @@
 """
-NarrativeGenerator — uses claude-sonnet-4-6 with prompt caching to generate
-plain-English path explanations for compliance analysts.
+NarrativeGenerator — generates plain-English path explanations for compliance analysts.
+Uses the Satorix LLM provider abstraction (Anthropic or Ollama based on LLM_PROVIDER env var).
 """
 import json
 import logging
-from typing import Optional
 
-import anthropic
+from shared.llm.provider import get_llm_provider, LLMMessage
+from shared.llm.prompt_library import SYSTEM_SATORIX_BASE
 
 from core.config import settings
 from core.redis_client import cache_key, cache_get, cache_set
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a financial intelligence analyst at an Indian corporate intelligence platform.
-Given a connection path between two corporate entities, write a concise 2–3 sentence plain-English narrative
-that explains the nature of the connection and any risk signals present. Be factual and precise.
-Use Indian regulatory terminology (DIN, CIN, CIRP, MCA21, SEBI) where appropriate.
-Do not add disclaimers. Output plain text only."""
+_NARRATIVE_SYSTEM = (
+    SYSTEM_SATORIX_BASE
+    + "\n\nGiven a connection path between two corporate entities, write a concise 2–3 sentence "
+    "plain-English narrative explaining the nature of the connection and any risk signals present. "
+    "Be factual and precise. Use Indian regulatory terminology (DIN, CIN, CIRP, MCA21, SEBI) "
+    "where appropriate. Do not add disclaimers. Output plain text only."
+)
 
 
 class NarrativeGenerator:
     def __init__(self) -> None:
-        if settings.anthropic_api_key:
-            self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
-        else:
-            self._client = None
-            logger.warning("ANTHROPIC_API_KEY not set — narrative generation disabled")
+        pass  # Provider resolved at call time so runtime env var changes take effect
 
     async def generate(
         self,
@@ -38,9 +36,6 @@ class NarrativeGenerator:
         signals: list[str],
         node_properties: dict[str, dict],
     ) -> str:
-        if not self._client:
-            return self._fallback_narrative(source_id, target_id, node_path, node_types, hop_details)
-
         ck = cache_key("narrative", src=source_id, tgt=target_id, path=node_path)
         cached = await cache_get(ck)
         if cached:
@@ -55,31 +50,27 @@ class NarrativeGenerator:
             for nid, props in node_properties.items()
             if nid in node_path
         }
-        user_content = f"""Path: {path_desc}
-Hop details: {json.dumps(hop_details, default=str)}
-Risk signals detected: {", ".join(signals) if signals else "none"}
-Entity properties: {json.dumps(props_summary, default=str)}
-
-Write the narrative:"""
+        user_content = (
+            f"Path: {path_desc}\n"
+            f"Hop details: {json.dumps(hop_details, default=str)}\n"
+            f"Risk signals detected: {', '.join(signals) if signals else 'none'}\n"
+            f"Entity properties: {json.dumps(props_summary, default=str)}\n\n"
+            "Write the narrative:"
+        )
 
         try:
-            response = await self._client.messages.create(
-                model="claude-sonnet-4-6",
+            provider = get_llm_provider()
+            response = await provider.complete(
+                messages=[LLMMessage(role="user", content=user_content)],
+                system=_NARRATIVE_SYSTEM,
                 max_tokens=256,
-                system=[
-                    {
-                        "type": "text",
-                        "text": SYSTEM_PROMPT,
-                        "cache_control": {"type": "ephemeral"},
-                    }
-                ],
-                messages=[{"role": "user", "content": user_content}],
+                temperature=0.3,
             )
-            text = response.content[0].text.strip()
+            text = response.content.strip()
             await cache_set(ck, {"text": text}, settings.redis_ttl_long)
             return text
         except Exception as exc:
-            logger.error("Narrative generation failed: %s", exc)
+            logger.error("Narrative generation failed (%s): %s", type(exc).__name__, exc)
             return self._fallback_narrative(source_id, target_id, node_path, node_types, hop_details)
 
     def _fallback_narrative(

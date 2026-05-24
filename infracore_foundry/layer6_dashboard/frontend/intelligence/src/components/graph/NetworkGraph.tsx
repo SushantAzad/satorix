@@ -10,6 +10,57 @@ interface Props {
   height?: number
 }
 
+function sanitizeCytoscapeElements(
+  nodes: CytoscapeNode[],
+  edges: CytoscapeEdge[],
+): { nodes: CytoscapeNode[]; edges: CytoscapeEdge[] } {
+  const nodeIds = new Set(nodes.map((n) => n.data.id))
+  const safeEdges = edges.filter((e) => {
+    const sourceOk = nodeIds.has(e.data.source)
+    const targetOk = nodeIds.has(e.data.target)
+    if (!sourceOk || !targetOk) {
+      console.warn(
+        `Dropping edge ${e.data.id}: ` +
+        `source=${e.data.source}(${sourceOk}) ` +
+        `target=${e.data.target}(${targetOk})`,
+      )
+      return false
+    }
+    return true
+  })
+  return { nodes, edges: safeEdges }
+}
+
+class GraphErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error: string }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props)
+    this.state = { hasError: false, error: '' }
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error: error.message }
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center h-64 bg-gray-50 rounded-lg border border-gray-200 p-6">
+          <p className="text-gray-500 text-sm mb-2">Network graph unavailable</p>
+          <p className="text-gray-400 text-xs font-mono">{this.state.error}</p>
+          <button
+            onClick={() => this.setState({ hasError: false, error: '' })}
+            className="mt-4 px-4 py-2 text-xs bg-gray-800 text-white rounded hover:bg-gray-700"
+          >
+            Retry
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 const STYLESHEET = [
   { selector: 'node', style: {
     label: 'data(label)', 'text-valign': 'bottom' as const, 'text-margin-y': 6,
@@ -36,12 +87,14 @@ const STYLESHEET = [
   { selector: ':selected', style: { 'border-width': 3, 'border-color': '#111827', 'border-opacity': 1 } },
 ]
 
-export function NetworkGraph({ nodes, edges, onNodeClick, height = 384 }: Props) {
+function NetworkGraphInner({ nodes, edges, onNodeClick, height = 384 }: Props) {
   const cyRef = useRef<Cytoscape.Core | null>(null)
 
+  const { nodes: safeNodes, edges: safeEdges } = sanitizeCytoscapeElements(nodes, edges)
+
   const elements = [
-    ...nodes.map(n => ({ data: { ...n.data, isAnomalous: n.data.isAnomalous ? 1 : 0, size: n.data.size || 30 } })),
-    ...edges.map(e => ({ data: { ...e.data, isInferred: e.data.isInferred ? 1 : 0 } })),
+    ...safeNodes.map(n => ({ data: { ...n.data, isAnomalous: n.data.isAnomalous ? 1 : 0, size: n.data.size || 30 } })),
+    ...safeEdges.map(e => ({ data: { ...e.data, isInferred: e.data.isInferred ? 1 : 0 } })),
   ]
 
   const handleCyInit = useCallback((cy: Cytoscape.Core) => {
@@ -53,7 +106,7 @@ export function NetworkGraph({ nodes, edges, onNodeClick, height = 384 }: Props)
     cy.fit(undefined, 30)
   }, [onNodeClick])
 
-  if (!nodes.length) return (
+  if (!safeNodes.length) return (
     <div className="flex items-center justify-center text-gray-400 text-sm" style={{ height }}>No network data available</div>
   )
 
@@ -65,5 +118,13 @@ export function NetworkGraph({ nodes, edges, onNodeClick, height = 384 }: Props)
       style={{ width: '100%', height }}
       cy={handleCyInit}
     />
+  )
+}
+
+export function NetworkGraph(props: Props) {
+  return (
+    <GraphErrorBoundary>
+      <NetworkGraphInner {...props} />
+    </GraphErrorBoundary>
   )
 }

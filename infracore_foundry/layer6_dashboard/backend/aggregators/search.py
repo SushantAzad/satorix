@@ -33,14 +33,26 @@ def _extract_identifier(entity_type: str, props: Dict) -> Optional[str]:
 def _build_search_result(raw: Dict) -> Dict:
     """
     Convert a raw L3 search result into a normalised SearchResult dict.
+
+    Handles two formats:
+      - Elasticsearch format: { id, index, score, source, highlights }
+      - Palantir-style:       { entityId, entityType, properties }
     """
+    # ── Entity type ─────────────────────────────────────────────────────────
     entity_type: str = (
         raw.get("entityType")
         or raw.get("entity_type")
         or raw.get("type")
-        or "unknown"
+        or ""
     ).lower()
 
+    if not entity_type and "index" in raw:
+        # Elasticsearch index name format: "ontology_company" → "company"
+        entity_type = str(raw["index"]).replace("ontology_", "").lower()
+
+    entity_type = entity_type or "unknown"
+
+    # ── Entity ID ────────────────────────────────────────────────────────────
     entity_id: str = (
         raw.get("entityId")
         or raw.get("entity_id")
@@ -48,7 +60,18 @@ def _build_search_result(raw: Dict) -> Dict:
         or ""
     )
 
-    props: Dict = raw.get("properties", raw.get("data", raw))
+    # ── Properties ──────────────────────────────────────────────────────────
+    # ES format stores the document body in "source"; Palantir uses "properties"
+    props: Dict = (
+        raw.get("source")       # Elasticsearch format
+        or raw.get("properties")
+        or raw.get("data")
+        or raw
+    )
+    if not isinstance(props, dict):
+        props = raw
+
+    # ── Name ────────────────────────────────────────────────────────────────
     name: str = (
         props.get("name")
         or props.get("company_name")
@@ -58,15 +81,22 @@ def _build_search_result(raw: Dict) -> Dict:
         or entity_id
     )
 
+    # ── Risk ─────────────────────────────────────────────────────────────────
     risk_score: int = int(
-        props.get("risk_score", raw.get("riskScore", raw.get("risk_score", 0))) or 0
+        props.get("riskScore", props.get("risk_score",
+        raw.get("riskScore", raw.get("risk_score", 0)))) or 0
     )
-    risk_flags: List[str] = props.get("risk_flags", raw.get("riskFlags", []))
-    match_score: float = float(raw.get("score", raw.get("matchScore", raw.get("match_score", 0.0))))
+    risk_flags: List[str] = props.get("riskFlags", props.get("risk_flags",
+        raw.get("riskFlags", raw.get("risk_flags", []))))
+    if not isinstance(risk_flags, list):
+        risk_flags = []
+
+    match_score: float = float(raw.get("score", raw.get("matchScore", raw.get("match_score", 0.0))) or 0.0)
 
     description: str = (
         props.get("description")
         or props.get("industry")
+        or props.get("companyType")
         or props.get("company_type")
         or raw.get("description")
         or ""

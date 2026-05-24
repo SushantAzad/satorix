@@ -120,11 +120,22 @@ def _format_inr(value: Optional[float]) -> Optional[str]:
 def _build_company_metrics(props: Dict) -> List[Dict]:
     metrics = []
 
-    revenue = props.get("revenue") or props.get("financials", {}).get("revenue") if isinstance(props.get("financials"), dict) else props.get("revenue")
-    ebitda = props.get("ebitda") or (props.get("financials", {}).get("ebitda") if isinstance(props.get("financials"), dict) else None)
-    current_ratio = props.get("current_ratio")
-    debt_to_equity = props.get("debt_to_equity")
-    paid_up_capital = props.get("paid_up_capital")
+    # Look for FY-prefixed financial properties first (e.g. FY2024_revenue), then plain keys
+    def _find_fy(base: str) -> Optional[float]:
+        for year in (2024, 2023, 2022, 2025):
+            v = props.get(f"FY{year}_{base}") or props.get(f"fy{year}_{base}")
+            if v is not None:
+                return float(v)
+        nested = props.get("financials")
+        if isinstance(nested, dict):
+            return nested.get(base)
+        return props.get(base)
+
+    revenue = _find_fy("revenue")
+    ebitda = _find_fy("ebitda")
+    current_ratio = props.get("current_ratio") or props.get("currentRatio")
+    debt_to_equity = props.get("debt_to_equity") or props.get("debtToEquity")
+    paid_up_capital = props.get("paid_up_capital") or props.get("paidUpCapital")
     status = props.get("status", "UNKNOWN")
 
     metrics.append({
@@ -182,7 +193,7 @@ def _build_director_metrics(props: Dict) -> List[Dict]:
     return [
         {
             "label": "Active Appointments",
-            "value": props.get("active_appointments", props.get("appointments_count")),
+            "value": props.get("currentDirectorships", props.get("active_appointments", props.get("appointments_count"))),
             "trend": None,
             "color": "gray",
             "sparkline": None,
@@ -190,7 +201,7 @@ def _build_director_metrics(props: Dict) -> List[Dict]:
         },
         {
             "label": "Total Companies",
-            "value": props.get("total_companies", props.get("companies_count")),
+            "value": props.get("historicalDirectorships", props.get("total_companies", props.get("companies_count"))),
             "trend": None,
             "color": "gray",
             "sparkline": None,
@@ -262,6 +273,7 @@ async def build_entity_profile(
     clients: LayerClients,
     entity_type: str,
     entity_id: str,
+    client_id: str = "PLATFORM_GLOBAL",
 ) -> Dict:
     """
     Fetch all entity data from Layers 3, 4, and 5 concurrently and assemble
@@ -269,7 +281,7 @@ async def build_entity_profile(
 
     Falls back gracefully when any upstream layer is unavailable.
     """
-    # Concurrent fetch from all layers
+    # Concurrent fetch from all layers — every L3/L4 call carries the caller's client_id
     (
         entity_data,
         risk_data,
@@ -280,14 +292,14 @@ async def build_entity_profile(
         trends,
         benchmark,
     ) = await asyncio.gather(
-        clients.get_entity(entity_type, entity_id),
-        clients.get_risk_score(entity_type, entity_id),
-        clients.get_alerts(entity_id=entity_id, limit=10),
-        clients.get_timeline(entity_type, entity_id),
-        clients.get_l4_network(entity_type, entity_id),
-        clients.get_influence_scores(entity_type, entity_id),
-        clients.get_trends(entity_id),
-        clients.get_benchmark(entity_id),
+        clients.get_entity(entity_type, entity_id, client_id=client_id),
+        clients.get_risk_score(entity_type, entity_id, client_id=client_id),
+        clients.get_alerts(entity_id=entity_id, limit=10, client_id=client_id),
+        clients.get_timeline(entity_type, entity_id, client_id=client_id),
+        clients.get_l4_network(entity_type, entity_id, client_id=client_id),
+        clients.get_influence_scores(entity_type, entity_id, client_id=client_id),
+        clients.get_trends(entity_id, entity_type),
+        clients.get_benchmark(entity_id, entity_type),
         return_exceptions=False,
     )
 
@@ -355,19 +367,66 @@ async def build_entity_profile(
         "risk_flags": risk_flags,
         "status": props.get("status", "UNKNOWN"),
         "industry": props.get("industry", ""),
+        "registered_state": props.get("registeredState") or props.get("registered_state", ""),
+        "company_type": props.get("companyType") or props.get("company_type", ""),
+        "incorporation_date": props.get("incorporationDate") or props.get("incorporation_date", ""),
+        "current_directorships": props.get("currentDirectorships"),
+        "historical_directorships": props.get("historicalDirectorships"),
+        "disqualification_status": props.get("disqualificationStatus", "None"),
+        "is_offshore": props.get("isOffshore", False),
+        "delay_days": props.get("delay_days") or props.get("delayDays"),
+        "completion_pct": props.get("completion_percentage") or props.get("completionPercentage"),
+        "promoter_cin": props.get("promoterCin", ""),
     }
     narrative: Optional[str] = await clients.generate_narrative(
         entity_type, entity_id, narrative_context
     )
     if not narrative:
-        # Compose a minimal fallback narrative from available data
         flag_str = ", ".join(risk_flags) if risk_flags else "no notable flags"
-        narrative = (
-            f"{entity_name} is a {entity_type} entity with a risk score of "
-            f"{raw_risk_score}/100 ({risk_band}) and {flag_str}. "
-            "Intelligence summary generated from available structured data — "
-            "connect Layer 5 for LLM-enriched analysis."
-        )
+        if entity_type == "company":
+            state = props.get("registeredState") or props.get("registered_state", "")
+            industry = props.get("industry", "")
+            status = props.get("status", "UNKNOWN")
+            inc_date = props.get("incorporationDate") or props.get("incorporation_date", "")
+            state_str = f" registered in {state}" if state else ""
+            industry_str = f" operating in {industry}" if industry else ""
+            inc_str = f", incorporated {inc_date}" if inc_date else ""
+            cirp_note = " The company is currently under CIRP proceedings." if "CIRP_ACTIVE" in risk_flags else ""
+            narrative = (
+                f"{entity_name} is a {status.lower()} Indian company{state_str}{industry_str}{inc_str}. "
+                f"Risk score: {raw_risk_score}/100 ({risk_band}) with flags: {flag_str}.{cirp_note} "
+                f"Connect Layer 5 for LLM-enriched due diligence analysis."
+            )
+        elif entity_type == "director":
+            current_dirs = props.get("currentDirectorships")
+            hist_dirs = props.get("historicalDirectorships")
+            disq = props.get("disqualificationStatus", "None")
+            offshore = props.get("isOffshore", False)
+            dirs_str = f" Currently holds {current_dirs} active directorship(s)" if current_dirs else ""
+            hist_str = f" with {hist_dirs} historical appointments" if hist_dirs else ""
+            disq_str = " Director is disqualified under Section 164(2) of the Companies Act." if disq == "Disqualified" else ""
+            offshore_str = " Director has non-Indian nationality." if offshore else ""
+            narrative = (
+                f"{entity_name} is an Indian corporate director (DIN: {entity_id}).{dirs_str}{hist_str}. "
+                f"Risk score: {raw_risk_score}/100 ({risk_band}) with flags: {flag_str}.{disq_str}{offshore_str} "
+                f"Connect Layer 5 for LLM-enriched director intelligence."
+            )
+        elif entity_type == "project":
+            proj_status = props.get("status", "UNKNOWN")
+            delay = props.get("delay_days") or props.get("delayDays")
+            comp_pct = props.get("completion_percentage") or props.get("completionPercentage")
+            delay_str = f" Delayed by {delay} days." if delay and delay > 0 else ""
+            comp_str = f" Completion: {comp_pct}%." if comp_pct is not None else ""
+            narrative = (
+                f"{entity_name} is a RERA-registered project with status '{proj_status}'.{comp_str}{delay_str} "
+                f"Risk score: {raw_risk_score}/100 ({risk_band}) with flags: {flag_str}. "
+                f"Connect Layer 5 for LLM-enriched project intelligence."
+            )
+        else:
+            narrative = (
+                f"{entity_name} ({entity_type}) — risk score {raw_risk_score}/100 ({risk_band}), flags: {flag_str}. "
+                f"Connect Layer 5 for LLM-enriched analysis."
+            )
 
     # -----------------------------------------------------------------------
     # ML Predictions

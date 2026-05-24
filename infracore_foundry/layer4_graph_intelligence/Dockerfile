@@ -2,21 +2,24 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# System deps for asyncpg, psycopg2
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc libpq-dev curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY layer4_graph_intelligence/requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-# Copy Layer 4 source
-COPY . /app
+# Shared LLM provider abstraction
+COPY shared/ /app/shared/
 
-# Copy Layer 3 source for ObjectDataFunnel import
-COPY ../layer3_ontology /app/layer3_ontology
+# Layer 3 ontology (needed for ObjectDataFunnel and schema imports)
+COPY layer3_ontology/ /app/layer3_ontology/
+
+# Layer 4 source directly into /app so `api.main` resolves correctly
+COPY layer4_graph_intelligence/ /app/
 
 ENV PYTHONPATH=/app:/app/layer3_ontology
+ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8004
 

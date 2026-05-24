@@ -31,7 +31,7 @@ x-airflow-common: &airflow-common
 
 services:
   postgres:
-    image: postgres:15
+    image: pgvector/pgvector:pg15
     container_name: infracore_postgres
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -230,12 +230,13 @@ services:
     container_name: infracore_kafka
     ports:
       - "9092:9092"
+      - "9094:9094"
     environment:
       KAFKA_CFG_NODE_ID: 0
       KAFKA_CFG_PROCESS_ROLES: controller,broker
-      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,PLAINTEXT_HOST://0.0.0.0:9094,CONTROLLER://:9093
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9094
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
       KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
@@ -401,6 +402,11 @@ services:
       LAYER3_API_URL: http://layer3-api:8003
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       API_KEY: ${API_KEY:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-120}
     depends_on:
       postgres:
         condition: service_healthy
@@ -445,6 +451,11 @@ services:
       LAYER5_API_PORT: 8005
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       FEATURE_SCHEMA_VERSION: "v1.0"
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-120}
     depends_on:
       postgres:
         condition: service_healthy
@@ -483,6 +494,11 @@ services:
       DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-SatorixAdmin2026!}
       CORS_ORIGINS: '["http://localhost:3000","http://localhost:3001","http://localhost:3002"]'
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-120}
     depends_on:
       postgres:
         condition: service_healthy
@@ -551,6 +567,45 @@ services:
       - layer6-api
     restart: unless-stopped
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: satorix-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # GPU support (uncomment if NVIDIA GPU available):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: satorix-ollama-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint: >
+      /bin/sh -c "
+        echo 'Pulling default model: qwen3:8b';
+        ollama pull qwen3:8b;
+        echo 'Model ready.';
+      "
+    restart: "no"
+
 volumes:
   postgres_data:
   minio_data:
@@ -563,3 +618,4 @@ volumes:
   intelligence_node_modules:
   operational_node_modules:
   schema_node_modules:
+  ollama_data:

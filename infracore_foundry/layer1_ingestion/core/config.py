@@ -188,6 +188,170 @@ def _auto_register_connectors() -> None:
     except ImportError:
         pass
 
+    # ── New generic connectors ──────────────────────────────────────────────
+    try:
+        from layer1_ingestion.connectors.email_connector import EmailConnector
+        register_connector("email", EmailConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.whatsapp_connector import WhatsAppConnector
+        register_connector("whatsapp", WhatsAppConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.mssql_connector import MSSQLConnector
+        register_connector("mssql", MSSQLConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.oracle_connector import OracleConnector
+        register_connector("oracle", OracleConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.mongodb_connector import MongoDBConnector
+        register_connector("mongodb", MongoDBConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.salesforce_connector import SalesforceConnector
+        register_connector("salesforce", SalesforceConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.sharepoint_connector import SharePointConnector
+        register_connector("sharepoint", SharePointConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.zoho_connector import ZohoConnector
+        register_connector("zoho", ZohoConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.sap_connector import SAPConnector
+        register_connector("sap", SAPConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.hubspot_connector import HubSpotConnector
+        register_connector("hubspot", HubSpotConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.freshdesk_connector import FreshdeskConnector
+        register_connector("freshdesk", FreshdeskConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.google_drive_connector import GoogleDriveConnector
+        register_connector("google_drive", GoogleDriveConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.azure_blob_connector import AzureBlobConnector
+        register_connector("azure_blob", AzureBlobConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.slack_connector import SlackConnector
+        register_connector("slack", SlackConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.notion_connector import NotionConnector
+        register_connector("notion", NotionConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.telegram_connector import TelegramConnector
+        register_connector("telegram", TelegramConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.dropbox_connector import DropboxConnector
+        register_connector("dropbox", DropboxConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.box_connector import BoxConnector
+        register_connector("box", BoxConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.quickbooks_connector import QuickBooksConnector
+        register_connector("quickbooks", QuickBooksConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.jira_connector import JiraConnector
+        register_connector("jira", JiraConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.zendesk_connector import ZendeskConnector
+        register_connector("zendesk", ZendeskConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.pipedrive_connector import PipedriveConnector
+        register_connector("pipedrive", PipedriveConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.ftp_connector import FTPConnector
+        register_connector("ftp", FTPConnector)
+    except ImportError:
+        pass
+
+    # ── New Indian-specific connectors ─────────────────────────────────────
+    try:
+        from layer1_ingestion.connectors.indian.gstn_connector import GSTNConnector
+        register_connector("gstn", GSTNConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.indian.ibbi_connector import IBBIConnector
+        register_connector("ibbi", IBBIConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.indian.bse_nse_connector import BSENSEConnector
+        register_connector("bse_nse", BSENSEConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.indian.rera_connector import RERAConnector
+        register_connector("rera", RERAConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.indian.epfo_connector import EPFOConnector
+        register_connector("epfo", EPFOConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.indian.msme_connector import MSMEConnector
+        register_connector("msme", MSMEConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.indian.busy_accounting_connector import BUSYAccountingConnector
+        register_connector("busy", BUSYAccountingConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.indian.traces_connector import TRACESConnector
+        register_connector("traces", TRACESConnector)
+    except ImportError:
+        pass
+    try:
+        from layer1_ingestion.connectors.indian.marg_erp_connector import MargERPConnector
+        register_connector("marg_erp", MargERPConnector)
+    except ImportError:
+        pass
+
 
 # Run auto-registration on module import.
 _auto_register_connectors()

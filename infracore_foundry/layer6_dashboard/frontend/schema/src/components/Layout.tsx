@@ -1,5 +1,5 @@
 import { Outlet, NavLink } from 'react-router-dom'
-import { Layers, GitCommit, CheckCircle, Play } from 'lucide-react'
+import { Layers, GitCommit, CheckCircle, Play, Cpu } from 'lucide-react'
 import clsx from 'clsx'
 
 const navItems = [
@@ -7,6 +7,7 @@ const navItems = [
   { to: '/versions', icon: GitCommit, label: 'Schema Versions' },
   { to: '/quality', icon: CheckCircle, label: 'Data Quality' },
   { to: '/function-tester', icon: Play, label: 'Function Tester' },
+  { to: '/llm-settings', icon: Cpu, label: 'LLM Provider' },
 ]
 
 export default function Layout() {

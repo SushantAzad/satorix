@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
-import { Bell, Search, LogOut } from 'lucide-react'
+import { useNavigate, Link, useLocation } from 'react-router-dom'
+import { Bell, Search, LogOut, Database, Brain } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '@shared/store/authStore'
 import { useAlertStore } from '@shared/store/alertStore'
@@ -13,6 +13,7 @@ const TYPE_COLORS: Record<string, string> = { company: 'text-blue-600', director
 
 export function Navigation() {
   const nav = useNavigate()
+  const location = useLocation()
   const { user, clearAuth } = useAuthStore()
   const unreadCount = useAlertStore(s => s.unacknowledgedCount)
   const [q, setQ] = useState('')
@@ -85,6 +86,32 @@ export function Navigation() {
       </div>
 
       <div className="flex-1" />
+
+      {/* Intelligence link */}
+      <Link
+        to="/intelligence"
+        className={`flex items-center gap-1.5 px-3 h-8 rounded-lg text-sm font-medium transition-colors ${
+          location.pathname.startsWith('/intelligence')
+            ? 'bg-blue-50 text-blue-700'
+            : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'
+        }`}
+      >
+        <Brain className="h-4 w-4" />
+        <span>Intelligence</span>
+      </Link>
+
+      {/* Sources link */}
+      <Link
+        to="/sources"
+        className={`flex items-center gap-1.5 px-3 h-8 rounded-lg text-sm font-medium transition-colors ${
+          location.pathname === '/sources'
+            ? 'bg-gray-100 text-gray-900'
+            : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'
+        }`}
+      >
+        <Database className="h-4 w-4" />
+        <span>Sources</span>
+      </Link>
 
       {/* Alerts */}
       <Link to="/alerts" className="relative p-2 rounded-lg hover:bg-gray-100 transition-colors">

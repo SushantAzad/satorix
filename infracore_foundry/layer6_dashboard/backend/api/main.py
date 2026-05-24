@@ -106,6 +106,7 @@ from api.routes import (  # noqa: E402  (after app is created)
     alerts,
     auth,
     entities,
+    intelligence,
     network,
     operational,
     reports,
@@ -122,6 +123,7 @@ app.include_router(reports.router, prefix="/api/v1/reports", tags=["reports"])
 app.include_router(sources.router, prefix="/api/v1/sources", tags=["sources"])
 app.include_router(watchlists.router, prefix="/api/v1/watchlists", tags=["watchlists"])
 app.include_router(operational.router, prefix="/api/v1/operational", tags=["operational"])
+app.include_router(intelligence.router, prefix="/api/v1/intelligence", tags=["intelligence"])
 app.include_router(ws_route.router, tags=["websocket"])
 
 # ---------------------------------------------------------------------------

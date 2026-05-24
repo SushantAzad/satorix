@@ -17,7 +17,7 @@ const FUNCTIONS: FunctionDef[] = [
     endpoint: '/api/v1/companies/:cin/group-risk-score',
     method: 'GET',
     params: [
-      { key: 'cin', label: 'CIN', placeholder: 'L17110MH1973PLC019786', required: true },
+      { key: 'cin', label: 'CIN', placeholder: 'L45201MH2003PLC142301', required: true },
     ],
   },
   {
@@ -26,7 +26,7 @@ const FUNCTIONS: FunctionDef[] = [
     endpoint: '/api/v1/companies/:cin/beneficial-ownership',
     method: 'GET',
     params: [
-      { key: 'cin', label: 'CIN', placeholder: 'L17110MH1973PLC019786', required: true },
+      { key: 'cin', label: 'CIN', placeholder: 'L45201MH2003PLC142301', required: true },
       { key: 'max_depth', label: 'Max Depth', placeholder: '5', required: false },
     ],
   },
@@ -36,7 +36,7 @@ const FUNCTIONS: FunctionDef[] = [
     endpoint: '/api/v1/companies/:cin/cirp-contagion',
     method: 'GET',
     params: [
-      { key: 'cin', label: 'CIN', placeholder: 'L17110MH1973PLC019786', required: true },
+      { key: 'cin', label: 'CIN', placeholder: 'L45201MH2003PLC142301', required: true },
     ],
   },
   {
@@ -72,7 +72,7 @@ const FUNCTIONS: FunctionDef[] = [
       {
         key: 'entity_id',
         label: 'Entity ID',
-        placeholder: 'L17110MH1973PLC019786',
+        placeholder: 'L45201MH2003PLC142301',
         required: true,
       },
     ],
@@ -159,9 +159,12 @@ export default function FunctionTester() {
       )
     } catch (err) {
       const duration = Date.now() - start
-      const msg = axios.isAxiosError(err)
-        ? err.response?.data ?? err.message
-        : String(err)
+      let msg: unknown
+      if (axios.isAxiosError(err) && err.response?.status === 404) {
+        msg = { error: 'Not Found', detail: `No entity found for the given parameters. Verify the CIN/DIN is correct and the entity exists in the system.`, status: 404 }
+      } else {
+        msg = axios.isAxiosError(err) ? err.response?.data ?? err.message : String(err)
+      }
       setResult(msg)
       setResultStatus('error')
       setLastDuration(duration)

@@ -19,9 +19,10 @@ RUN pip install --no-cache-dir \
     anthropic==0.25.0 \
     aioredis==2.0.1 \
     httpx==0.25.2 \
-    kafka-python==2.0.2 \
+    kafka-python-ng==2.2.3 \
     minio==7.2.0
 
+COPY shared/ /app/shared/
 COPY layer5_analytics_ai/ /app/
 
 ENV PYTHONPATH=/app

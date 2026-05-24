@@ -24,6 +24,8 @@ class FeatureComputer:
         await self._populate_neo4j_company_features(cin, feats)
         await self._populate_pg_company_features(cin, feats)
         await self._populate_l4_company_features(cin, feats)
+        await self._populate_financial_statement_features(cin, feats)
+        await self._populate_document_features(cin, feats)
         return feats
 
     async def compute_project_features(self, project_id: str) -> dict[str, float]:
@@ -273,6 +275,93 @@ class FeatureComputer:
                         feats["sector_avg_delay"] = float(props["sectorAvgDelayMonths"])
         except Exception as exc:
             logger.warning("PG project feature computation failed for %s: %s", project_id, exc)
+
+    # ------------------------------------------------------------------ #
+    #  Company — FinancialStatement features (Gap 2 + Gap 5)             #
+    # ------------------------------------------------------------------ #
+
+    async def _populate_financial_statement_features(self, cin: str, feats: dict) -> None:
+        """Compute business intelligence features from FinancialStatement ontology objects."""
+        pool = get_pool()
+        try:
+            async with pool.acquire() as conn:
+                import json
+                rows = await conn.fetch(
+                    """
+                    SELECT properties FROM ontology_objects
+                    WHERE object_type = 'financial_statement'
+                      AND properties->>'cin' = $1
+                      AND properties->>'period' = 'annual'
+                    ORDER BY properties->>'financial_year' DESC
+                    LIMIT 5
+                    """,
+                    cin,
+                )
+                if not rows:
+                    return
+
+                statements = []
+                for row in rows:
+                    props = row["properties"] if isinstance(row["properties"], dict) else json.loads(row["properties"] or "{}")
+                    statements.append(props)
+
+                feats["financial_statement_years"] = float(len(statements))
+
+                # Most recent statement
+                latest = statements[0]
+                if latest.get("revenue") is not None:
+                    feats["revenue_latest_cr"] = float(latest["revenue"])
+                if latest.get("total_debt") is not None:
+                    feats["total_debt_latest_cr"] = float(latest["total_debt"])
+                if latest.get("ebitda_margin_pct") is not None:
+                    feats["ebitda_margin_latest"] = float(latest["ebitda_margin_pct"])
+                if latest.get("debt_service_coverage") is not None:
+                    feats["debt_service_coverage_latest"] = float(latest["debt_service_coverage"])
+                if latest.get("debt_equity_ratio") is not None:
+                    feats["debt_equity_ratio"] = float(latest["debt_equity_ratio"])
+                if latest.get("current_ratio") is not None:
+                    feats["current_ratio"] = float(latest["current_ratio"])
+
+                # Working capital days (working_capital / (revenue / 365))
+                wc = latest.get("working_capital")
+                rev = latest.get("revenue")
+                if wc is not None and rev and rev > 0:
+                    feats["working_capital_days"] = round(float(wc) / (float(rev) / 365), 1)
+
+                # Related-party transaction ratio
+                rpt = latest.get("related_party_tx_value")
+                if rpt is not None and rev and rev > 0:
+                    feats["related_party_tx_ratio"] = round(float(rpt) / float(rev) * 100, 2)
+
+                # Revenue CAGR over 3 years
+                if len(statements) >= 3:
+                    rev_latest = float(statements[0].get("revenue") or 0)
+                    rev_oldest = float(statements[2].get("revenue") or 0)
+                    if rev_oldest > 0 and rev_latest > 0:
+                        cagr = ((rev_latest / rev_oldest) ** (1 / 2) - 1) * 100
+                        feats["revenue_cagr_3y"] = round(cagr, 2)
+                        feats["revenue_trend_3y"] = round(cagr / 100, 4)
+
+        except Exception as exc:
+            logger.warning("Financial statement feature computation failed for %s: %s", cin, exc)
+
+    async def _populate_document_features(self, cin: str, feats: dict) -> None:
+        """Count indexed documents for this entity."""
+        pool = get_pool()
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT count(*) AS cnt FROM ontology_objects
+                    WHERE object_type = 'document'
+                      AND properties->>'entity_ref_id' = $1
+                    """,
+                    cin,
+                )
+                if row:
+                    feats["document_count"] = float(row["cnt"] or 0)
+        except Exception as exc:
+            logger.warning("Document count feature computation failed for %s: %s", cin, exc)
 
 
 feature_computer = FeatureComputer()
