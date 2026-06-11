@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker stop *)",
+      "Bash(docker rm *)",
+      "Bash(docker start *)",
+      "Bash(curl -s http://localhost:8004/health)",
+      "Bash(curl -s http://localhost:8005/health)",
+      "Bash(curl -s http://localhost:8003/)",
+      "Bash(curl -s http://localhost:8003/openapi.json)",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s http://localhost:8003/health)",
+      "Bash(curl -s \"http://localhost:8006/api/v1/entities/search?q=reliance&limit=5\" -H \"Authorization: Bearer $\\(curl -s -X POST http://localhost:8006/api/v1/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"admin@satorix.internal\",\"password\":\"SatorixAdmin2026!\"}')",
+      "Bash(curl -s \"http://localhost:8003/search?q=director&size=3\")",
+      "Bash(curl -sv \"http://localhost:8000/api/v1/entities/director/00001234/network?depth=2\")"
+    ]
+  }
+}

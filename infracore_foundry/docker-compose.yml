@@ -1,0 +1,621 @@
+version: "3.8"
+
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.7.3
+  environment: &airflow-env
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    AIRFLOW__CORE__FERNET_KEY: ""
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session"
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+    KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    REDIS_URL: redis://redis:6379/0
+  volumes:
+    - ./layer1_ingestion/airflow/dags:/opt/airflow/dags
+    - ./layer2_pipeline/airflow/dags:/opt/airflow/dags/layer2
+    - ./layer4_graph_intelligence/airflow/dags:/opt/airflow/dags/layer4
+    - ./layer4_graph_intelligence:/opt/airflow/layer4
+    - ./layer5_analytics_ai/airflow/dags:/opt/airflow/dags/layer5
+    - ./layer5_analytics_ai:/opt/airflow/layer5
+    - ./layer1_ingestion/airflow/plugins:/opt/airflow/plugins
+    - airflow_logs:/opt/airflow/logs
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: infracore_postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: infracore_minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc
+    container_name: infracore_minio_init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      /usr/bin/mc alias set myminio http://minio:9000 $${MINIO_ACCESS_KEY} $${MINIO_SECRET_KEY};
+      /usr/bin/mc mb --ignore-existing myminio/raw-data;
+      /usr/bin/mc mb --ignore-existing myminio/processed-data;
+      /usr/bin/mc mb --ignore-existing myminio/profiling-reports;
+      /usr/bin/mc mb --ignore-existing myminio/model-artifacts;
+      echo 'MinIO buckets initialized';
+      exit 0;
+      "
+
+  redis:
+    image: redis:7-alpine
+    container_name: infracore_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  airflow-init:
+    <<: *airflow-common
+    container_name: infracore_airflow_init
+    environment:
+      <<: *airflow-env
+      _AIRFLOW_DB_UPGRADE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: admin
+      _AIRFLOW_WWW_USER_PASSWORD: admin
+    command: version
+    restart: "no"
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: infracore_airflow_webserver
+    command: webserver
+    ports:
+      - "8080:8080"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: infracore_airflow_scheduler
+    command: scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "airflow jobs check --job-type SchedulerJob --hostname $(hostname)",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  airflow-worker:
+    <<: *airflow-common
+    container_name: infracore_airflow_worker
+    command: celery worker
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  layer1-api:
+    build:
+      context: .
+      dockerfile: layer1_ingestion/api/Dockerfile
+    container_name: infracore_layer1_api
+    ports:
+      - "8001:8001"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_RAW_BUCKET: raw-data
+      MINIO_SECURE: "false"
+      REDIS_URL: redis://redis:6379/0
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      API_HOST: 0.0.0.0
+      API_PORT: 8001
+      LOG_LEVEL: ${LOG_LEVEL}
+      API_KEY: ${API_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  layer2-api:
+    build:
+      context: .
+      dockerfile: layer2_pipeline/api/Dockerfile
+    container_name: infracore_layer2_api
+    ports:
+      - "8002:8002"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_SECURE: "false"
+      REDIS_URL: redis://redis:6379/0
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      API_HOST: 0.0.0.0
+      API_PORT: 8002
+      LOG_LEVEL: ${LOG_LEVEL}
+      API_KEY: ${API_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  kafka:
+    # image: bitnami/kafka:3.6.0
+    # image: bitnami/kafka:latest
+    # image: ghcr.io/bitnami/kafka:3.7.0
+    image: public.ecr.aws/bitnami/kafka:3.7.0
+    container_name: infracore_kafka
+    ports:
+      - "9092:9092"
+      - "9094:9094"
+    environment:
+      KAFKA_CFG_NODE_ID: 0
+      KAFKA_CFG_PROCESS_ROLES: controller,broker
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,PLAINTEXT_HOST://0.0.0.0:9094,CONTROLLER://:9093
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9094
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_CFG_LOG_RETENTION_HOURS: 168
+      KAFKA_CFG_LOG_SEGMENT_BYTES: 1073741824
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    volumes:
+      - kafka_data:/bitnami/kafka
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1",
+        ]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  streaming-worker:
+    build:
+      context: .
+      dockerfile: layer1_ingestion/api/Dockerfile
+    container_name: infracore_streaming_worker
+    command: ["python", "-m", "layer1_ingestion.streaming.streaming_worker"]
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_SECURE: "false"
+      REDIS_URL: redis://redis:6379/0
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPICS: ${KAFKA_TOPICS:-}
+      KAFKA_GROUP_ID: infracore-l1-streaming
+      KAFKA_MAX_BATCH_SIZE: "1000"
+      KAFKA_MAX_BATCH_SECONDS: "60"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  neo4j:
+    image: neo4j:5.14
+    container_name: infracore_neo4j
+    hostname: neo4j
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-infracore123}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_memory_heap_initial__size: 2G
+      NEO4J_dbms_memory_heap_max__size: 4G
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "cypher-shell -u neo4j -p ${NEO4J_PASSWORD:-infracore123} 'RETURN 1' || exit 1",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  elasticsearch:
+    image: elasticsearch:8.11.0
+    container_name: infracore_elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms1g -Xmx2g"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  layer3-api:
+    build:
+      context: ./layer3_ontology
+      dockerfile: Dockerfile
+    container_name: infracore_layer3_api
+    ports:
+      - "8003:8003"
+    environment:
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-infracore123}
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_SECURE: "false"
+      REDIS_URL: redis://redis:6379/0
+      LAYER3_API_PORT: 8003
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SCHEMA_VERSION: 1.0.0
+      RISK_SCORE_BATCH_SIZE: 100
+      INGEST_CHUNK_SIZE: 1000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+
+  layer4-api:
+    build:
+      context: .
+      dockerfile: layer4_graph_intelligence/Dockerfile
+    container_name: infracore_layer4_api
+    ports:
+      - "8004:8004"
+    environment:
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-infracore123}
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      LAYER4_API_PORT: 8004
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LAYER3_API_URL: http://layer3-api:8003
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      API_KEY: ${API_KEY:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-120}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      layer3-api:
+        condition: service_started
+    restart: unless-stopped
+
+  layer5-api:
+    build:
+      context: .
+      dockerfile: layer5_analytics_ai/Dockerfile
+    container_name: infracore_layer5_api
+    ports:
+      - "8005:8005"
+    environment:
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-infracore123}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_SECURE: "false"
+      LAYER3_API_URL: http://layer3-api:8003
+      LAYER4_API_URL: http://layer4-api:8004
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      API_KEY: ${API_KEY:-}
+      LAYER5_API_PORT: 8005
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      FEATURE_SCHEMA_VERSION: "v1.0"
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-120}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      layer3-api:
+        condition: service_started
+      layer4-api:
+        condition: service_started
+    restart: unless-stopped
+
+  layer6-api:
+    build:
+      context: ./layer6_dashboard/backend
+      dockerfile: Dockerfile
+    container_name: layer6-api
+    ports:
+      - "8006:8006"
+    environment:
+      POSTGRES_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/1
+      LAYER1_API_URL: http://layer1-api:8001
+      LAYER2_API_URL: http://layer2-api:8002
+      LAYER3_API_URL: http://layer3-api:8003
+      LAYER4_API_URL: http://layer4-api:8004
+      LAYER5_API_URL: http://layer5-api:8005
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      LAYER6_API_PORT: 8006
+      LAYER6_WS_PORT: 8007
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-secret-key-change-in-production}
+      DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-admin@satorix.internal}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-SatorixAdmin2026!}
+      CORS_ORIGINS: '["http://localhost:3000","http://localhost:3001","http://localhost:3002"]'
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-120}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      layer3-api:
+        condition: service_started
+      layer5-api:
+        condition: service_started
+    restart: unless-stopped
+
+  intelligence-dashboard:
+    image: node:20-alpine
+    container_name: satorix_intelligence_dashboard
+    working_dir: /frontend/intelligence
+    command: sh -c "npm install --prefix /frontend && npm install && npm run dev -- --host"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./layer6_dashboard/frontend:/frontend
+      - frontend_shared_modules:/frontend/node_modules
+      - intelligence_node_modules:/frontend/intelligence/node_modules
+    environment:
+      VITE_API_PROXY_TARGET: http://layer6-api:8006
+      VITE_WS_PROXY_TARGET: ws://layer6-api:8006
+      CHOKIDAR_USEPOLLING: "true"
+    depends_on:
+      - layer6-api
+    restart: unless-stopped
+
+  operational-dashboard:
+    image: node:20-alpine
+    container_name: satorix_operational_dashboard
+    working_dir: /frontend/operational
+    command: sh -c "npm install --prefix /frontend && npm install && npm run dev -- --host"
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./layer6_dashboard/frontend:/frontend
+      - frontend_shared_modules:/frontend/node_modules
+      - operational_node_modules:/frontend/operational/node_modules
+    environment:
+      VITE_API_PROXY_TARGET: http://layer6-api:8006
+      CHOKIDAR_USEPOLLING: "true"
+    depends_on:
+      - layer6-api
+    restart: unless-stopped
+
+  schema-manager:
+    image: node:20-alpine
+    container_name: satorix_schema_manager
+    working_dir: /frontend/schema
+    command: sh -c "npm install --prefix /frontend && npm install && npm run dev -- --host"
+    ports:
+      - "3002:3002"
+    volumes:
+      - ./layer6_dashboard/frontend:/frontend
+      - frontend_shared_modules:/frontend/node_modules
+      - schema_node_modules:/frontend/schema/node_modules
+    environment:
+      VITE_API_PROXY_TARGET: http://layer6-api:8006
+      CHOKIDAR_USEPOLLING: "true"
+    depends_on:
+      - layer6-api
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: satorix-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # GPU support (uncomment if NVIDIA GPU available):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: satorix-ollama-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint: >
+      /bin/sh -c "
+        echo 'Pulling default model: qwen3:8b';
+        ollama pull qwen3:8b;
+        echo 'Model ready.';
+      "
+    restart: "no"
+
+volumes:
+  postgres_data:
+  minio_data:
+  redis_data:
+  airflow_logs:
+  kafka_data:
+  neo4j_data:
+  elasticsearch_data:
+  frontend_shared_modules:
+  intelligence_node_modules:
+  operational_node_modules:
+  schema_node_modules:
+  ollama_data:

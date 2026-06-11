@@ -1,0 +1,194 @@
+pipeline_id: infracore_director_mapping
+version: "1.0"
+client_id: infracore
+description: >
+  Cleans MCA21 director data, validates DINs, flags disqualified directors,
+  detects shared DINs across companies (key intelligence signal), and
+  enriches with appointment age and tenure.
+
+lineage_config:
+  entity_type: director
+  entity_id_column: din
+
+steps:
+  # ── CLEANING ──────────────────────────────────────────────────────────────
+
+  - step_id: trim_strings
+    transform_type: trim_whitespace
+    depends_on: []
+    config:
+      collapse_internal: true
+
+  - step_id: normalize_director_name
+    transform_type: normalize_case
+    depends_on: [trim_strings]
+    config:
+      columns: [director_name, father_name]
+      mode: title
+
+  - step_id: normalize_din
+    transform_type: normalize_din
+    depends_on: [trim_strings]
+    config:
+      column: din
+    quality_rules:
+      - rule_id: din_not_null
+        rule_type: not_null
+        column: din
+        severity: error
+        failure_policy: reject
+      - rule_id: din_format
+        rule_type: regex
+        column: din
+        severity: error
+        failure_policy: flag
+        parameters:
+          pattern: "^\\d{8}$"
+
+  - step_id: normalize_cin
+    transform_type: normalize_cin
+    depends_on: [trim_strings]
+    config:
+      column: cin
+    quality_rules:
+      - rule_id: cin_not_null
+        rule_type: not_null
+        column: cin
+        severity: error
+        failure_policy: reject
+
+  - step_id: normalize_pan_director
+    transform_type: normalize_pan
+    depends_on: [trim_strings]
+    config:
+      column: pan
+
+  - step_id: normalize_director_status
+    transform_type: normalize_case
+    depends_on: [trim_strings]
+    config:
+      columns: [director_status, designation]
+      mode: title
+    quality_rules:
+      - rule_id: status_in_set
+        rule_type: in_set
+        column: director_status
+        severity: warning
+        failure_policy: flag
+        parameters:
+          allowed:
+            - Active
+            - Disqualified
+            - Resigned
+            - Deceased
+            - Vacated
+
+  # ── DATE PARSING ──────────────────────────────────────────────────────────
+
+  - step_id: parse_dates
+    transform_type: parse_indian_date
+    depends_on: [trim_strings]
+    config:
+      columns:
+        - date_of_appointment
+        - date_of_cessation
+        - date_of_birth
+
+  - step_id: compute_director_age
+    transform_type: compute_age
+    depends_on: [parse_dates]
+    config:
+      source_column: date_of_birth
+      target_column: age_at_appointment
+    on_error: warn
+
+  - step_id: compute_tenure
+    transform_type: date_difference
+    depends_on: [parse_dates]
+    config:
+      start_column: date_of_appointment
+      end_column: date_of_cessation
+      target_column: tenure_days
+      unit: days
+    on_error: warn
+
+  # ── INTELLIGENCE SIGNALS ──────────────────────────────────────────────────
+
+  - step_id: flag_disqualified
+    transform_type: add_computed_column
+    depends_on: [normalize_director_status]
+    config:
+      target_column: is_disqualified
+      expression: "director_status == 'Disqualified'"
+
+  - step_id: add_din_company_key
+    transform_type: concat_columns
+    depends_on: [normalize_din, normalize_cin]
+    config:
+      source_columns: [din, cin]
+      target_column: din_cin_key
+      separator: "::"
+
+  # ── ADDRESS ───────────────────────────────────────────────────────────────
+
+  - step_id: extract_pin_director
+    transform_type: extract_pin_code
+    depends_on: [trim_strings]
+    config:
+      source_column: address
+      target_column: pin_code
+    on_error: warn
+
+  - step_id: normalize_state_director
+    transform_type: normalize_state
+    depends_on: [trim_strings]
+    config:
+      column: state
+    on_error: warn
+
+  # ── DEDUPLICATION ─────────────────────────────────────────────────────────
+
+  - step_id: dedup_din_cin
+    transform_type: deduplicate_rows
+    depends_on:
+      - normalize_din
+      - normalize_cin
+      - parse_dates
+      - flag_disqualified
+    config:
+      key_columns: [din, cin]
+      keep: last
+
+  # ── FINAL SELECTION ───────────────────────────────────────────────────────
+
+  - step_id: select_output_columns
+    transform_type: select_columns
+    depends_on:
+      - dedup_din_cin
+      - normalize_director_name
+      - normalize_pan_director
+      - compute_director_age
+      - compute_tenure
+      - extract_pin_director
+      - normalize_state_director
+      - add_din_company_key
+    config:
+      columns:
+        - din
+        - cin
+        - director_name
+        - father_name
+        - date_of_birth
+        - age_at_appointment
+        - designation
+        - director_status
+        - is_disqualified
+        - date_of_appointment
+        - date_of_cessation
+        - tenure_days
+        - pan
+        - address
+        - pin_code
+        - state
+        - din_cin_key
+        - nationality

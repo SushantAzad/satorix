@@ -1,0 +1,36 @@
+fastapi==0.104.0
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Database
+sqlalchemy[asyncio]==2.0.23
+asyncpg==0.29.0
+psycopg2-binary==2.9.9
+
+# Neo4j (GDS queries via Cypher, no GDS Python client needed)
+neo4j==5.14.0
+
+# Elasticsearch (read-only)
+elasticsearch==8.11.0
+
+# Redis
+redis[hiredis]==5.0.1
+
+# Kafka
+kafka-python-ng==2.2.3
+
+# Anthropic (narrative generation + NL query parsing)
+anthropic==0.28.0
+
+# Fuzzy matching (address clustering)
+rapidfuzz==3.5.2
+
+# Data
+pandas==2.2.2
+pyarrow==15.0.2
+
+# HTTP client (Layer 3 Funnel fallback)
+httpx==0.25.2
+
+python-dotenv==1.0.0

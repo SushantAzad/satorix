@@ -1,0 +1,764 @@
+SATORIX PLATFORM — COMPLETE SYSTEM DOCUMENTATION                                                                                                
+                                                                                                                                                  
+  Based on: Direct codebase inspection on 2026-05-03                                                                                              
+  Codebase: /opt/php74/satorix/infracore_foundry                                                                                                  
+  Total: 310 Python files, 25,604 lines of code across 4 layers                                                                                   
+                                                                                                                                                  
+  ---                                                                                                                                             
+  1. SYSTEM OVERVIEW                                                                                                                              
+                                                                                                                                                  
+  What it actually does:                                                                                                                          
+  Satorix is a data intelligence platform built for Indian corporate entity analysis. It ingests raw structured data from multiple sources (MCA21,
+   SEBI, RBI, CSV, APIs), cleans and normalises it through declarative YAML pipelines, maps it into a typed ontology graph, and computes risk     
+  scores, community clusters, influence centrality, and CIRP (insolvency) precursor signals across the entity graph.                              
+                                                                                                                                                  
+  Problems it solves:                                                                                                                             
+  - Ingesting and deduplicating messy Indian regulatory data (CIN, DIN, GSTIN, PAN normalisation)                                                 
+  - Detecting cross-entity risk through shared director/address/ownership patterns                                                                
+  - Predicting CIRP risk before insolvency filings using graph signals                                                                            
+  - Producing graph-traversal-based connection paths between corporate entities                                                                   
+  - Maintaining a versioned, lineage-tracked record of every data transformation                                                                  
+                                                                                                                                                  
+  Current maturity: 4 layers fully coded and importable. Infrastructure (Kafka, Neo4j, Elasticsearch) required for runtime — not currently        
+  running. System test passes 128/128 checks against local Python logic.                                                                          
+                                                                                                                                                  
+  ---                                                                                                                                             
+  2. LAYER-WISE BREAKDOWN                                   
+                         
+  Layer 1 — Data Ingestion
+                                                                                                                                                  
+  Port: 8001
+  Purpose: Extract raw data from sources, profile quality, land as Parquet in MinIO, notify downstream.                                           
+                                                                                                                                                  
+  Implemented components:
+  - FastAPI API (api/app.py) — v0.2.0, 4 route groups: sources, sync, health, webhooks                                                            
+  - 10 generic connectors — CSV, Excel, PDF, Google Sheets, MySQL, REST API, S3, SFTP, Webhook + base class                                       
+  - 4 Indian-specific connectors — MCA21, RBI, SEBI, Tally                                                 
+  - Data profiler (profiling/profiler.py) — produces ProfileReport with per-column quality analysis (completeness, uniqueness, pattern            
+  conformance, anomalies, distribution)                                                                                                           
+  - 13 domain consistency rules — PaidUpCannotExceedAuthorized, IncorporationDateNotFuture, CIRPCompanyFinancials, DebtEquityEqualsCost, etc.     
+  - Indian identifier validators — CIN, DIN, GSTIN (pattern), PAN, IFSC, PIN, Mobile with validate_cin(), validate_pan(), validate_din(),         
+  validate_gstin() standalone functions                                                                                                           
+  - Schema detector/normaliser/type inferrer — auto-detects Indian identifier columns by sampling                                                 
+  - Sync engine (sync/sync_engine.py) — publishes layer1.raw.parquet.ready to Kafka (primary) and Redis LPUSH (fallback)                          
+  - Kafka publisher (streaming/kafka_producer.py) — KafkaEventPublisher, lazy-init, acks=all, non-fatal on failure                                
+  - State manager — high-water mark incremental sync tracking                                                                                     
+  - Batch ID generation — SHA-256(source_id + sync_type + hour_partition)[:16], deterministic                                                     
+  - Airflow DAG — extraction_dag.py                                                                                                               
+  - DB migrations — 2 SQL files (source registry schema)                                                                                          
+  - API key auth — optional, warns on startup if not set                                                                                          
+                                                                                                                                                  
+  Inputs: CSV, Excel, PDF, MySQL, REST APIs, Google Sheets, S3, SFTP, webhooks, MCA21/RBI/SEBI regulatory feeds                                   
+  Outputs: Parquet files in MinIO (raw-data/ bucket), layer1.raw.parquet.ready Kafka event, Redis queue fallback                                  
+  Status: COMPLETE — 71 files, 8,506 lines                                                                                                        
+                                                                                                                                                  
+  ---                                                                                                                                             
+  Layer 2 — Transformation Pipeline                                                                                                               
+                                                                                                                                                  
+  Port: 8002
+  Purpose: Execute declarative YAML pipelines on raw Parquet — clean, validate, deduplicate, enrich, output processed Parquet.                    
+                                                                                                                                                  
+  Implemented components:
+  - FastAPI API (api/app.py) — 4 route groups: pipelines, runs, errors, lineage                                                                   
+  - PipelineExecutor (core/executor.py, 635 lines) — reads Parquet from MinIO → parses DAG → executes steps in topological order → writes         
+  processed Parquet → persists run state                                                                                                 
+    - Deterministic run_id: SHA-256(pipeline_id:version:input_batch_id)[:16]                                                                      
+    - Idempotency: skips already-completed runs                             
+    - PostgreSQL advisory lock: prevents concurrent runs for same pipeline/batch                                                                  
+    - Cross-batch deduplication: wired pre-transform, 90-day lookback                                                                             
+    - Publishes layer2.clean.ready to Kafka on completion                                                                                         
+  - PipelineDAG (core/dag.py) — parses YAML, topological sort (networkx or DFS fallback), cycle detection, critical path computation              
+  - 28+ transform classes in 3 categories:                                                                                                        
+    - Cleaning: TrimWhitespace, NormalizeCase, NormalizeCIN, NormalizeGSTIN, NormalizePAN, NormalizeDIN, NormalizeIFSC, ParseIndianDate,          
+  ComputeFinancialYear, ComputeAge, DateDifference, ExtractPINCode, NormalizeState, NormalizeCity, SplitAddressComponents, RegexExtract,          
+  RegexReplace, FillNullString, RemoveSpecialCharacters                                                                                           
+    - Structural: RenameColumns, DropColumns, SelectColumns, AddComputedColumn, AddConstantColumn, SplitColumn, ConcatColumns, CastColumn,        
+  InnerJoin, LeftJoin, Union, Aggregate, Pivot, Unpivot, Lookup                                                                                   
+    - Enrichment: reference lookups (state, PIN code, NIC code, IFSC)                                                                             
+  - DataQualityValidator — applies QualityRule objects: not_null, not_empty, regex/regex_match, range, in_set, custom_expr, referential; 4 failure
+   policies: reject, flag, default, transform                                                                                                     
+  - Deduplicator — ExactDeduplicator (key-column drop-dup), FuzzyDeduplicator (rapidfuzz, threshold), CrossBatchDeduplicator (SHA-256[:16]        
+  fingerprints persisted in l2_batch_fingerprints)                                                                                                
+  - Cross-batch dedup storage — l2_batch_fingerprints table, unique index on (pipeline_id, fingerprint), 90-day lookback, capped at 50,000        
+  fingerprints per run                                                                                                                    
+  - LineageTracker — field-level lineage events per transform step                                                                                
+  - QuarantineManager — bad records go to quarantine table with error classification
+  - Error classifier — classifies errors as source, transform, or system                                                                          
+  - Airflow DAG (layer2_pipeline_dag.py) — polls every 15 minutes; priority: Kafka → Redis → DB discovery; retries 2× with exponential backoff,   
+  max 4 concurrent runs                                                                                                                           
+  - Pipeline definitions — 2 YAML files: company_master.yaml (20-step pipeline for MCA21 data), director_mapping.yaml                             
+  - DB migrations — 3 SQL files: pipeline definitions, pipeline runs/step-runs, batch fingerprints                                                
+                                                                                                                                                  
+  Inputs: Parquet files from MinIO (Layer 1 output), layer1.raw.parquet.ready Kafka/Redis events                                                  
+  Outputs: Processed Parquet in MinIO (processed-data/ bucket), layer2.clean.ready Kafka event, DB run records + lineage                          
+  Status: COMPLETE — 43 files, 4,824 lines                                                                                                        
+                                                                                                                                                  
+  ---                                                                                                                                             
+  Layer 3 — Ontology & Intelligence                                                                                                               
+                                                            
+  Port: 8003
+  Purpose: Map processed data into a typed entity graph, compute risk scores, detect anomalies, run automated actions, maintain temporal history.
+                                                                                                                                                  
+  Implemented components:
+                                                                                                                                                  
+  - FastAPI API (api/main.py) — 9 route groups: objects, search, graph, intelligence, actions, timeline, health, ingest, schema                   
+  Elasticsearch index + Redis cache invalidation + Kafka event emission on every write                                                    
+  - BatchIngestor (ingestion/batch_ingestor.py, 219 lines) — loads Parquet from MinIO → maps → validates → writes via Funnel; emits               
+  layer3.ingest.complete to Kafka on completion                                                                                    
+  - Kafka publisher (core/kafka_publisher.py) — two producers: fire-and-forget (acks=0, linger 100ms) for layer3.ontology.changes; acknowledged   
+  (acks=all, retries=3) for layer3.ingest.complete                                                                                             
+  - Schema registry — ObjectTypeRegistry, LinkTypeRegistry, PropertyRegistry, InterfaceRegistry, VersionManager backed by 5 PostgreSQL tables;    
+  seeded on API startup                                                                                                                       
+  - 12 ontology object types — Company, Director, Address, Alert, Event, LegalCase, InsolvencyProceeding, Project, RegulatoryAction,              
+  RegulatoryBody, GovernmentEntity (with Indian-specific types: CIN_Type, Currency_INR, IndianDate_Type, RiskScore_Type)            
+  - 4 link type modules — Corporate (8 links: DIRECTED, OWNS, SUBSIDIARY_OF, REGISTERED_AT, SHARES_DIRECTOR_WITH, SHARES_ADDRESS_WITH,            
+  COMMON_BENEFICIAL_OWNER, HAS_EVENT), Regulatory, Project, Inference (inferred links)                                                
+  - ObjectMapper — maps raw Parquet DataFrames to ontology objects by source name                                                                 
+  - RelationshipMapper — extracts director-company links from director DataFrames
+  - SchemaValidator — validates records against type definitions before write                                                                     
+  - 5 anomaly detectors — DirectorProliferationDetector, AddressClusteringDetector, CIRPContagionDetector, FilingComplianceDetector,              
+  RegulatoryRecidivismDetector                                                                                                                    
+  - Risk scoring engine — RiskScoringEngine orchestrates CompanyScorer, DirectorScorer, ProjectScorer, GroupScorer; CompanyScorer.compute_score() 
+  pulls Neo4j for regulatory actions, directors, projects; has sync score() method for props-only fast path                                       
+  - 6 graph intelligence modules — NetworkMapper, ClusterDetector, InfluenceScorer, PathFinder, TemporalAnalyzer, SharedAttributeAnalyzer         
+  - predictProjectCompletionProbability (kinetic/functions/project_probability.py) — heuristic v0.3 with FEATURE_SCHEMA_VERSION constant; factors:
+   schedule delay (non-linear), land acquisition, cost overrun, project status, CIRP on owner, regulatory actions                                 
+  - WorkflowEngine (kinetic/workflow_engine.py) — 5 registered action types: FlagCompanyForReview, UpdateProjectStatus,                           
+  MarkRegulatoryActionResolved, CreateIntelligenceAlert, MergeCompanyObjects; role-gated                                                          
+  - ChangeDetector (timeline/change_detector.py) — uses deepdiff to diff object states; detect() / compute_diff() methods                         
+  - TimelineService, EventSourcingService — temporal event tracking and audit log                                        
+  - RBAC — RBACMiddleware, ObjectSecurityFilter, role hierarchy (analyst, data_steward, compliance_head, platform_administrator, system)          
+  - AuditLogger — all write operations logged                                                                                                     
+  - 4 health monitors — OntologyHealth, OrphanDetector, DuplicateSurface, ImpossibleStateDetector                                                 
+  - Storage layer — Neo4jStore (MERGE), ElasticsearchStore (index), CacheStore (Redis TTL), EventStore, IncrementalIndexer                        
+  - Schema registry migration — 1 SQL file (6 tables: object_types, property_definitions, link_types, interfaces, schema_versions,                
+  data_source_mappings)                                                                                                                           
+                                                                                                                                                  
+  Inputs: Processed Parquet from MinIO, HTTP POST to /api/v1/ingest                                                                               
+  Outputs: PostgreSQL (ontology_objects, ontology_links, schema tables), Neo4j graph (MERGE), Elasticsearch indices, Redis cache,                 
+  layer3.ontology.changes + layer3.ingest.complete Kafka events                                                                                   
+  Status: COMPLETE — 126 files, 7,890 lines                                                                                                       
+                                                                                                                                                  
+  ---                                                       
+  Layer 4 — Graph Intelligence
+
+  Port: 8004
+  Purpose: Advanced pre-computed graph analytics — centrality, community detection, path intelligence, CIRP precursor scoring, temporal analysis.
+  Reads from Neo4j/PostgreSQL, writes pre-computed results to L4 PostgreSQL tables.                                                               
+   
+  Implemented components:                                                                                                                         
+                                                            
+  - FastAPI API (api/main.py) — 8 route groups: network, paths, clusters, attributes, influence, subgraph, temporal, queries; CORS wide-open (*)  
+  Redis keys on entity change; runs as asyncio background task on startup                                                                    
+  - NetworkMapper — GraphNode, GraphEdge, NetworkMap dataclasses; builds in-memory network subgraphs from Neo4j queries                           
+  - TraversalEngine — TraversalStep class; BFS/DFS traversal with hop limits                                           
+  - PruningEngine — reduces large graphs for API responses                                                                                        
+  - ShortestPathFinder — PathResult dataclass; Cypher-based shortest path                                                                         
+  - AllPathsFinder — MultiPathResult; all paths with max hop limit                                                                                
+  - PathScorer — ScoredPath dataclass; scores connection paths by risk signal density                                                             
+  - NarrativeGenerator — uses Anthropic claude-sonnet-4-6 (AsyncAnthropic client) with Redis caching to produce plain-English path narratives;    
+  gracefully disabled if ANTHROPIC_API_KEY not set                                                                                                
+  - 6 clustering algorithms — LouvainDetector/LouvainClusterDetector, LabelPropagationDetector, AddressClusterDetector, DirectorClusterDetector,  
+  RegulatoryClusterDetector, TemporalClusterDetector; all use Neo4j GDS projections                                                               
+  - 6 influence/centrality scorers — PageRankComputer/PageRankScorer, BetweennessCentralityComputer/BetweennessCentralityScorer,                  
+  DegreeCentralityComputer, RegulatoryExposureComputer, RiskWeightedComputer, InfluenceAggregator                                               
+  - 3 shared-attribute detectors — SharedDirectorDetector/DirectorConnectionDetector, SharedAddressDetector/AddressConnectionDetector,            
+  SharedOwnerDetector, SharedAttributeBatchProcessor                                                                                  
+  - PrecursorModel (temporal/precursor_model.py) — CIRPRiskAssessment dataclass; rule-based scoring using 13 signals (director turnover,          
+  regulatory actions, legal cases, address clustering, offshore directors, etc.) with CRITICAL/HIGH/MEDIUM/LOW bands and explicit Phase 2 XGBoost
+  upgrade path                                                                                                                                    
+  - VelocityAnalyzer, RotationTracker — director rotation rate and velocity analysis for temporal signals
+  - EventCorrelator, SnapshotEngine — graph state snapshots and event correlation                                                                 
+  - SubgraphExtractor, SnapshotBuilder, SubgraphDiffer — named subgraph extraction, snapshots, diffing                                            
+  - SubgraphTemplate — predefined subgraph patterns                                                                                               
+  - QueryParser — ParsedQuery dataclass; natural language query parsing using Anthropic API (disabled without API key)                            
+  - QueryComposer — routes parsed queries to appropriate analysis subsystems                                                                      
+  - GDS client (core/gds_client.py) — Neo4j Graph Data Science API wrapper                                                                        
+  - Neo4j compat shim — _Neo4jClientCompat class (exposes neo4j_client singleton with run_query/run_write)                                        
+  - Airflow DAG (l4_nightly_intelligence_batch.py) — runs at 1am daily; sequential phases: create_projection → betweenness → pagerank → degree →  
+  louvain → label_propagation → address_clusters → director_clusters → precursor_model                                                            
+  - L4 schema migration — 1 SQL file: l4_influence_scores, l4_cluster_memberships, l4_address_clusters, l4_subgraph_definitions, l4_batch_runs    
+  tables                                                                                                                                          
+  - API key auth — optional, warns on startup if not set                                                                                          
+                                                            
+  Inputs: Neo4j graph (reads), l3_* PostgreSQL tables (reads), Kafka (layer3.ontology.changes, layer3.ingest.complete)                            
+  Outputs: l4_influence_scores, l4_cluster_memberships, l4_address_clusters PostgreSQL tables; Redis cache (l4:* namespace); HTTP JSON API        
+  responses                                                                                                                                       
+  Status: COMPLETE — 70 files, 4,384 lines                                                                                                        
+                                                                                                                                                  
+  ---                                                       
+  3. DATA FLOW (REAL)
+                                                                                                                                                  
+  External Source (CSV / MCA21 / MySQL / API / Webhook)
+          │                                                                                                                                       
+          ▼                                                                                                                                       
+  Layer 1 API (port 8001) / Airflow extraction_dag                                                                                                
+    [Connector reads raw data]                                                                                                                    
+    [DataProfiler produces quality report]                                                                                                        
+    [Schema fingerprint computed: SHA-256[:16]]                                                                                                   
+    [Raw Parquet → MinIO: raw-data/{client}/{source}/{batch_id}.parquet]                                                                          
+    [Batch ID = SHA-256(source_id + sync_type + hour)[:16]]                                                                                       
+          │                                                                                                                                       
+          ├── PRIMARY: Kafka → topic: layer1.raw.parquet.ready                                                                                    
+          │   payload: {batch_id, source_id, client_id, output_path, records, schema_fingerprint}                                                 
+          └── FALLBACK: Redis LPUSH → layer1:sync:complete                                                                                        
+          │                                                                                                                                       
+          ▼                                                                                                                                       
+  Layer 2 Airflow DAG (polls every 15 min)                                                                                                        
+    [Consumes Kafka layer1.raw.parquet.ready → Redis fallback → DB discovery]                                                                     
+    [PipelineExecutor.execute()]                                                                                                                  
+      [Advisory lock: pg_advisory_lock prevents concurrent runs]                                                                                  
+      [Run ID = SHA-256(pipeline_id:version:batch_id)[:16] — idempotent]                                                                          
+      [Reads Parquet from MinIO]                                                                                                                  
+      [Column normalisation]                                                                                                                      
+      [Cross-batch dedup: load seen fingerprints from l2_batch_fingerprints (90-day window)]                                                      
+      [DAG topological sort → execute steps sequentially]                                                                                         
+      [Each step: transform → quality rules → lineage event]                                                                                      
+      [Failed records → quarantine table]                                                                                                         
+      [Processed Parquet → MinIO: processed-data/{client}/{pipeline_id}/{run_id}.parquet]                                                         
+      [New fingerprints persisted → l2_batch_fingerprints]                                                                                        
+    [Kafka → topic: layer2.clean.ready]                                                                                                           
+          │                                                                                                                                       
+          ▼  (MANUAL/AIRFLOW trigger — no automatic L2→L3 event consumer yet)                                                                     
+  Layer 3 BatchIngestor (triggered by API call or Airflow job)                                                                                    
+    [ParquetLoader reads from MinIO processed-data/]                                                                                              
+    [ObjectMapper maps rows → ontology objects by source name]                                                                                    
+    [RelationshipMapper extracts links]                                                                                                           
+    [SchemaValidator validates against type registry]                                                                                             
+    [ObjectDataFunnel.write_object() — sole write path]     
+      [PostgreSQL UPSERT: ontology_objects table, versioned]                                                                                      
+      [Neo4j MERGE: creates/updates node with all properties]                                                                                     
+      [Elasticsearch index: full-text search]                                                                                                     
+      [Redis cache invalidate: removes stale object cache]                                                                                        
+      [Kafka emit_change(): layer3.ontology.changes (acks=0, fire-and-forget)]                                                                    
+    [Kafka emit_ingest_complete(): layer3.ingest.complete (acks=all)]                                                                             
+          │                                                                                                                                       
+          ├── Real-time: layer3.ontology.changes → Layer 4 cache invalidator                                                                      
+          │   [Deletes l4:*:{entity_id}* Redis keys]                                                                                              
+          │                                                 
+          └── Nightly: layer3.ingest.complete → L4 Airflow DAG (1am)                                                                              
+          │                                                                                                                                       
+          ▼
+  Layer 4 Nightly Batch (Airflow, 1am daily)                                                                                                      
+    [GDS projection: build in-memory graph from Neo4j]                                                                                            
+    [Betweenness centrality → l4_influence_scores]                                                                                                
+    [PageRank → l4_influence_scores]                                                                                                              
+    [Degree centrality → l4_influence_scores]                                                                                                     
+    [Louvain community detection → l4_cluster_memberships]                                                                                        
+    [Label propagation → l4_cluster_memberships]
+    [Address cluster detection → l4_address_clusters]                                                                                             
+    [Director cluster detection → l4_cluster_memberships]                                                                                         
+    [CIRP precursor model → l4_influence_scores + risk assessments]
+                                                                                                                                                  
+  Layer 4 API (port 8004) serves pre-computed results on demand.                                                                                  
+                                                                                                                                                  
+  Known gap: Layer 2 publishes layer2.clean.ready to Kafka, but Layer 3 has no consumer listening to this topic. Layer 3 ingestion must be        
+  triggered manually via API or via separate Airflow scheduling. The Kafka event is emitted but nothing picks it up automatically.
+                                                                                                                                                  
+  ---                                                       
+  4. COMPONENT INVENTORY
+                                                                                                                                                  
+  ┌────────────────────┬────────────────────────────────────────────────────┬─────────────────────────────────────────────────┬──────────────┐  
+  │     Component      │                      Location                       │                  What It Does                   │    Status    │   
+  ├────────────────────┼─────────────────────────────────────────────────────┼─────────────────────────────────────────────────┼──────────────┤ 
+  │ Layer 1 API        │ layer1_ingestion/api/app.py                         │ FastAPI v0.2.0, source management, sync         │ Active       │   
+  │                  │                                                                         │ management, sync triggers, health │         │  
+  ├──────────────────┼─────────────────────────────────────────────────────────────────────────┼───────────────────────────────────┼─────────┤    
+  │ Layer 2 API      │ layer2_pipeline/api/app.py                                              │ FastAPI, pipeline CRUD, run       │ Active  │    
+  │                  │                                                                         │ history, lineage queries          │         │    
+  ├──────────────────┼─────────────────────────────────────────────────────────────────────────┼───────────────────────────────────┼─────────┤    
+  │ Layer 3 API      │ layer3_ontology/api/main.py                                             │ FastAPI, object CRUD, graph       │ Active  │  
+  │                  │                                                                         │ queries, intelligence, actions    │         │    
+  ├──────────────────┼─────────────────────────────────────────────────────────────────────────┼───────────────────────────────────┼─────────┤  
+  │ Layer 4 API      │ layer4_graph_intelligence/api/main.py                                   │ FastAPI, graph traversal,         │ Active  │    
+  │                  │                                                                         │ clustering, influence, NL queries │         │ 
+  ├──────────────────┼─────────────────────────────────────────────────────────────────────────┼───────────────────────────────────┼─────────┤    
+  │                  │                                                                         │ Runs YAML pipelines: transform,   │ Active, │ 
+  │ PipelineExecutor │ layer2_pipeline/core/executor.py                                        │ validate, dedup, lineage          │  635    │    
+  │                  │                                                                         │                                   │ lines   │ 
+  ├──────────────────┼─────────────────────────────────────────────────────────────────────────┼───────────────────────────────────┼─────────┤ 
+  │                  │                                                                         │ Sole write path for all ontology  │ Active, │ 
+  │ ObjectDataFunnel │ layer3_ontology/storage/object_data_funnel.py                           │ data (4 stores)                    │  377    │
+  │                  │                                                                         │                                    │ lines   │   
+  ├──────────────────┼─────────────────────────────────────────────────────────────────────────┼────────────────────────────────────┼─────────┤
+  │                       │                                                                       │                                 │ lines  │    
+  ├───────────────────────┼───────────────────────────────────────────────────────────────────────┼─────────────────────────────────┼────────┤    
+  │                       │                                                                       │                                 │ Active │ 
+  │ BatchIngestor         │ layer3_ontology/ingestion/batch_ingestor.py                           │ Parquet→ontology mapping+write  │ , 219  │    
+  │                       │                                                                       │                                 │ lines  │ 
+  ├───────────────────────┼───────────────────────────────────────────────────────────────────────┼─────────────────────────────────┼────────┤    
+  │                       │                                                                       │ Publishes                       │        │ 
+  │ L1 Kafka Publisher    │ layer1_ingestion/streaming/kafka_producer.py                          │ layer1.raw.parquet.ready, Redis │ Active │    
+  │                       │                                                                       │  fallback                       │        │ 
+  ├───────────────────────┼───────────────────────────────────────────────────────────────────────┼─────────────────────────────────┼────────┤    
+  │ L3 Kafka Publisher    │ layer3_ontology/core/kafka_publisher.py                               │ Two producers: ff+ack for ontol │ Active │ 
+  │                       │                                                                       │ ogy.changes/ingest.complete     │        │    
+  ├───────────────────────┼───────────────────────────────────────────────────────────────────────┼─────────────────────────────────┼────────┤ 
+  │ L4 Cache Invalidator  │ layer4_graph_intelligence/network/network_cache.py                    │ Kafka consumer → Redis key      │ Active │    
+  │                       │                                                                       │ deletion on entity changes      │        │    
+  │                      │                                                                     │ discovery, retries 2×          │            │ 
+  ├──────────────────────┼─────────────────────────────────────────────────────────────────────┼────────────────────────────────┼────────────┤    
+  │ L4 Airflow DAG       │ layer4_graph_intelligence/airflow/dags/l4_nightly_intelligence_batc │ 1am daily, 8 sequential phases │ Active     │ 
+  │                      │ h.py                                                                │                                │            │ 
+  ├──────────────────────┼─────────────────────────────────────────────────────────────────────┼────────────────────────────────┼────────────┤ 
+  │ L1 Airflow DAG       │ layer1_ingestion/airflow/dags/extraction_dag.py                     │ Extraction orchestration       │ Active     │    
+  ├──────────────────────┼─────────────────────────────────────────────────────────────────────┼────────────────────────────────┼────────────┤ 
+  │ MCA21 Connector      │ layer1_ingestion/connectors/indian/mca21_connector.py               │ MCA21 company master ingestion │ Active     │    
+  ├──────────────────────┼─────────────────────────────────────────────────────────────────────┼────────────────────────────────┼────────────┤ 
+  │ SEBI Connector       │ layer1_ingestion/connectors/indian/sebi_connector.py                │ SEBI enforcement data          │ Active     │    
+  ├──────────────────────┼─────────────────────────────────────────────────────────────────────┼────────────────────────────────┼────────────┤ 
+  │ RBI Connector        │ layer1_ingestion/connectors/indian/rbi_connector.py                 │ RBI releases                   │ Active     │    
+  ├──────────────────────┼─────────────────────────────────────────────────────────────────────┼────────────────────────────────┼────────────┤ 
+  │ Tally Connector      │ layer1_ingestion/connectors/indian/tally_connector.py               │ Tally accounting data          │ Active     │    
+  ├──────────────────────┼─────────────────────────────────────────────────────────────────────┼────────────────────────────────┼────────────┤ 
+  │                      │                                                                     │ Quality profiling:             │            │    
+  │ DataProfiler         │ layer1_ingestion/profiling/profiler.py                              │ ColumnProfile, null%, pattern  │ Active     │ 
+  │                      │                                                                     │ conformance                    │            │    
+  ├──────────────────────┼─────────────────────────────────────────────────────────────────────┼────────────────────────────────┼────────────┤    
+  │ CrossBatchDeduplicat │ layer2_pipeline/quality/deduplicator.py                             │ SHA-256[:16] fingerprint,      │ Active,    │
+  │ or                   │                                                                     │ 90-day window                  │ wired      │    
+  ├──────────────────────┼─────────────────────────────────────────────────────────────────────┼────────────────────────────────┼────────────┤
+  │                      │                                                                     │ Orchestrates                   │            │
+  │ RiskScoringEngine    │ layer3_ontology/intelligence/risk_scoring/engine.py                 │ company/director/project       │ Active     │
+  │                      │                                                                     │ scorers                        │            │
+  ├──────────────────────┼─────────────────────────────────────────────────────────────────────┼────────────────────────────────┼────────────┤
+  │ PrecursorModel       │ layer4_graph_intelligence/temporal/precursor_model.py               │ 13-signal CIRP risk,           │ Active     │    
+  │                      │                                                                     │ CRITICAL/HIGH/MEDIUM/LOW       │            │
+  ├──────────────────────┼─────────────────────────────────────────────────────────────────────┼────────────────────────────────┼────────────┤    
+  │                      │                                                                     │                                │ Conditiona │
+  │ NarrativeGenerator   │ layer4_graph_intelligence/pathfinding/narrative_generator.py        │ Claude API path narratives     │ l (needs   │    
+  │                      │                                                                     │                                │ API key)   │
+  ├──────────────────────┼─────────────────────────────────────────────────────────────────────┼────────────────────────────────┼────────────┤    
+  │                      │                                                                     │                                │ Conditiona │    
+  │ QueryParser          │ layer4_graph_intelligence/query_builder/query_parser.py             │ NL→graph query via Claude API  │ l (needs   │    
+  │                      │                                                                     │                                │ API key)   │    
+  ├──────────────────────┼─────────────────────────────────────────────────────────────────────┼────────────────────────────────┼────────────┤    
+  │ WorkflowEngine       │ layer3_ontology/kinetic/workflow_engine.py                          │ 5 action types, role-gated     │ Active     │
+  ├──────────────────────┼─────────────────────────────────────────────────────────────────────┼────────────────────────────────┼────────────┤    
+  │ RBAC                 │ layer3_ontology/dynamic/rbac.py                                     │ Role-based access control      │ Active     │
+  ├──────────────────────┼─────────────────────────────────────────────────────────────────────┼────────────────────────────────┼────────────┤    
+  │                      │                                                                     │ Standalone Kafka consumer      │ Active     │
+  │ StreamingWorker      │ layer1_ingestion/streaming/streaming_worker.py                      │ process                        │ (docker    │    
+  │                      │                                                                     │                                │ service)   │
+  ├──────────────────────┼─────────────────────────────────────────────────────────────────────┼────────────────────────────────┼────────────┤    
+  │ company_master.yaml  │ layer2_pipeline/pipelines/infracore/company_master.yaml             │ 20-step MCA21 cleaning         │ Active     │
+  │                      │                                                                     │ pipeline                       │            │    
+  └──────────────────────┴─────────────────────────────────────────────────────────────────────┴────────────────────────────────┴────────────┘
+                                                                                                                                                  
+  ---                                                       
+  5. PIPELINE & PROCESSING SYSTEM
+                                                                                                                                                  
+  Definition format: YAML files, stored in layer2_pipeline/pipelines/{client}/.
+                                                                                                                                                  
+  YAML structure:                                           
+  pipeline_id: infracore_company_master                                                                                                           
+  version: "1.0"                                            
+  client_id: infracore                                                                                                                            
+  lineage_config:     
+    entity_type: company                                                                                                                          
+    entity_id_column: cin                                   
+  cross_batch_dedup:                                                                                                                              
+    enabled: true                                                                                                                                 
+    key_columns: [cin]
+  steps:                                                                                                                                          
+    - step_id: normalize_cin                                                                                                                      
+      transform_type: normalize_cin
+      depends_on: []                                                                                                                              
+      config: {column: cin, reject_invalid: false}                                                                                                
+      quality_rules:                              
+        - rule_id: cin_not_null                                                                                                                   
+          rule_type: not_null                               
+          column: cin                                                                                                                             
+          failure_policy: reject                            
+      on_error: fail                                                                                                                              
+                                                            
+  Execution: PipelineExecutor.execute() — never raises, all errors captured in DB.                                                                
+                                                                                                                                                  
+  DAG system:                                                                                                                                     
+  - Uses networkx for topological sort and cycle detection (falls back to DFS if networkx missing)                                                
+  - Computes critical path for monitoring                                                                                                         
+  - Step definitions: step_id, transform_type, config, depends_on, quality_rules, on_error
+  - Transform registry: 28+ transforms keyed by string type name, auto-registered at import                                                       
+                                                                                                                                                  
+  Scheduling:                                                                                                                                     
+  - Layer 1: Airflow extraction_dag.py                                                                                                            
+  - Layer 2: Airflow layer2_pipeline_dag.py — */15 * * * *, max 4 concurrent runs, retries 2×, exponential backoff, max retry 30min               
+  - Layer 4: Airflow l4_nightly_intelligence_batch.py — 0 1 * * *, max 1 concurrent run, sequential phases via XCom                
+                                                                                                                                                  
+  Production pipeline definition delivery: Pipeline YAML must be loaded into the l2_pipeline_definitions DB table before execution. No hot-reload 
+  or file-watching; DB is source of truth at runtime.                                                                                             
+                                                                                                                                                  
+  Currently defined pipelines: 2 (company_master, director_mapping).                                                                              
+                                                            
+  ---                                                                                                                                             
+  6. DATA STORAGE & INFRASTRUCTURE                          
+                                                                                                                                                  
+  ┌───────────────┬─────────────────────┬─────────────────────┬───────────────────────────────────────────────────────────────────────────────┐
+  │     Store     │       Version       │        Port         │                                     Usage                                     │   
+  ├───────────────┼─────────────────────┼─────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
+  │ PostgreSQL    │ 15                  │ 5432                │ Ground truth for all metadata, pipeline runs, ontology objects/links, schema  │
+  │               │                     │                     │ registry, fingerprints                                                        │
+  ├───────────────┼─────────────────────┼─────────────────────┼───────────────────────────────────────────────────────────────────────────────┤   
+  │ MinIO         │ latest              │ 9000 (API), 9001    │ Raw Parquet (Layer 1 output), Processed Parquet (Layer 2 output)              │   
+  │               │                     │ (console)           │                                                                               │   
+  ├───────────────┼─────────────────────┼─────────────────────┼───────────────────────────────────────────────────────────────────────────────┤   
+  │ Redis         │ 7 (Alpine)          │ 6379                │ L2 trigger queue (fallback), L3 object cache (TTL: 1h/6h/24h), L4 computed    │
+  │               │                     │                     │ result cache (l4:* namespace)                                                 │   
+  ├───────────────┼─────────────────────┼─────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
+  │ Apache Kafka  │ 3.7.0 (bitnami)     │ 9092                │ Inter-layer event bus: layer1.raw.parquet.ready → layer2.clean.ready →        │   
+  │               │                     │                     │ layer3.ontology.changes + layer3.ingest.complete                              │   
+  ├───────────────┼─────────────────────┼─────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
+  │ Neo4j         │ 5.14                │ 7474 (browser),     │ Entity relationship graph (MERGE pattern), GDS algorithms                     │   
+  │               │                     │ 7687 (bolt)         │                                                                               │   
+  ├───────────────┼─────────────────────┼─────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
+  │ Elasticsearch │ 8.11.0              │ 9200                │ Full-text search on ontology objects, no auth (xpack.security.enabled=false)  │   
+  ├───────────────┼─────────────────────┼─────────────────────┼───────────────────────────────────────────────────────────────────────────────┤   
+  │ Airflow       │ 2.7.3               │ 8080 (UI)           │ DAG orchestration for all 3 active layers                                     │
+  │               │ (CeleryExecutor)    │                     │                                                                               │   
+  └───────────────┴─────────────────────┴─────────────────────┴───────────────────────────────────────────────────────────────────────────────┘
+                                                                                                                                                  
+  Database layout:                                          
+  - Single PostgreSQL instance (infracore DB) shared by Layers 1, 2, and 3
+  - L1 tables: source registry (unprefixed)                                                                                                       
+  - L2 tables: all prefixed l2_ — l2_pipeline_definitions, l2_pipeline_runs, l2_pipeline_step_runs, l2_dataset_versions, l2_batch_fingerprints
+  - L3 tables: unprefixed — ontology_objects, ontology_links, ontology_object_types, ontology_property_definitions, ontology_link_types,          
+  ontology_interfaces, ontology_schema_versions                                                                                                   
+  - L4 tables: prefixed l4_ — l4_influence_scores, l4_cluster_memberships, l4_address_clusters, l4_subgraph_definitions, l4_batch_runs            
+                                                                                                                                                  
+  MinIO buckets (created by minio-init container): raw-data, processed-data                                                                       
+                                                                                                                                                  
+  Airflow infrastructure: CeleryExecutor with Redis broker, PostgreSQL result backend, 3 containers: webserver, scheduler, worker.                
+                                                                                                                                                  
+  ---                                                                                                                                             
+  7. INTEGRATIONS & DEPENDENCIES                            
+                                
+  External APIs (optional, not required for core function):
+  - Anthropic claude-sonnet-4-6 — used by NarrativeGenerator (path narratives) and QueryParser (NL queries) in Layer 4. Both classes check for    
+  ANTHROPIC_API_KEY and disable gracefully if not set.                                                                                            
+                                                                                                                                                  
+  Internal service dependencies at runtime:                                                                                                       
+  - Layer 1 API → PostgreSQL (source registry), MinIO (Parquet storage)                                                                           
+  - Layer 2 Executor → PostgreSQL (pipeline state), MinIO (read raw/write processed Parquet), Redis (optional)                                    
+  - Layer 3 API → PostgreSQL, Neo4j, Elasticsearch, Redis, MinIO, Kafka                                                                           
+  - Layer 4 API → PostgreSQL (l4_* tables), Neo4j (GDS), Redis, Kafka (consumer only)                                                             
+  - All layers → Kafka (graceful degradation if unavailable)                                                                                      
+                                                                                                                                                  
+  Kafka consumer groups:                                                                                                                          
+  - Layer 2 DAG: satorix-layer2-airflow-trigger (consumes layer1.raw.parquet.ready)                                                               
+  - Layer 4 cache invalidator: satorix-l4-cache-invalidator (consumes layer3.ontology.changes + layer3.ingest.complete)                           
+                                                            
+  Authentication:                                                                                                                                 
+  - Layer 1 and Layer 4: optional API key via API_KEY env var; warns on startup if unset; all endpoints unprotected without it
+  - Layer 3: RBAC middleware with roles: analyst, data_steward, compliance_head, platform_administrator, system                                   
+  - Layer 4: wide-open CORS (allow_origins=["*"]) — this is a security gap in production                       
+                                                                                                                                                  
+  Kafka library: kafka-python-ng 2.2.3 (NOT the kafka-python==2.0.2 listed in requirements.txt — that package is broken on Python 3.12). Must     
+  install with --break-system-packages on Ubuntu.                                                                                                 
+                                                                                                                                                  
+  ---                                                                                                                                             
+  8. FEATURES STATUS MATRIX                                 
+
+  ┌────────────────────────────┬─────────────┬────────────────────────────────────────────────────────────────────────────────────────────────┐
+  │          Feature           │   Status    │                                             Notes                                              │
+  ├────────────────────────────┼─────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Multi-source ingestion     │ Implemented │ 10 generic + 4 Indian connectors                                                               │
+  ├────────────────────────────┼─────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Indian identifier          │ Implemented │ CIN, DIN, PAN, IFSC, PIN, Mobile; GSTIN pattern-only (checksum disabled)                       │   
+  │ validation                 │             │                                                                                                │   
+  ├────────────────────────────┼─────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Data profiling             │ Implemented │ Per-column quality, 13 domain rules, null%, pattern conformance                                │   
+  ├────────────────────────────┼─────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Schema fingerprinting      │ Implemented │ SHA-256[:16] of sorted column:dtype, drift detection                                           │   
+  ├────────────────────────────┼─────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Parquet storage (MinIO)    │ Implemented │ Raw and processed buckets                                                                      │   
+  ├────────────────────────────┼─────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ Kafka inter-layer events   │ Implemented │ L1→L2 (parquet.ready), L2→L3 (clean.ready emitted, not consumed), L3→L4 (ontology.changes,     │   
+  │                            │             │ ingest.complete)                                                                               │
+  ├────────────────────────────┼─────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Redis fallback (L1→L2)     │ Implemented │ LPUSH to layer1:sync:complete, consumed by L2 DAG                                              │
+  ├────────────────────────────┼─────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ YAML pipeline definitions  │ Implemented │ 28+ transforms, DAG-based, 2 pipelines in repo                                                 │
+  ├────────────────────────────┼─────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ DAG cycle detection        │ Implemented │ networkx primary, DFS fallback                                                                 │
+  ├────────────────────────────┼─────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Quality validation         │ Implemented │ 7 rule types, 4 failure policies                                                               │
+  ├────────────────────────────┼─────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Exact deduplication        │ Implemented │ Key-column based, sort by column, keep first/last                                              │
+  ├────────────────────────────┼─────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Fuzzy deduplication        │ Implemented │ rapidfuzz, configurable threshold                                                              │
+  ├────────────────────────────┼─────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Cross-batch deduplication  │ Implemented │ SHA-256[:16] fingerprints, 90-day window, DB-persisted, wired into executor                    │
+  ├────────────────────────────┼─────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Pipeline idempotency       │ Implemented │ Deterministic run_id, skip already-completed runs                                              │
+  ├────────────────────────────┼─────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Advisory locking           │ Implemented │ PostgreSQL pg_advisory_lock prevents concurrent runs                                           │
+  ├────────────────────────────┼─────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Field-level lineage        │ Implemented │ LineageEvent per field per transform step                                                      │
+  ├────────────────────────────┼─────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Error quarantine           │ Implemented │ QuarantineManager, error classification                                                        │
+  ├────────────────────────────┼─────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Ontology object types      │ Implemented │ 12 types with Indian-specific property types                                                   │
+  ├────────────────────────────┼─────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Ontology link types        │ Implemented │ 4 modules, 8+ link types                                                                       │
+  ├────────────────────────────┼─────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Schema registry             │ Implemented │ Versioned, 6 PostgreSQL tables, seeded on startup                                             │
+  ├─────────────────────────────┼─────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ ObjectDataFunnel            │ Implemented │ 4-store atomic write path (PG + Neo4j + ES + Redis)                                           │
+  ├─────────────────────────────┼─────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Neo4j graph storage         │ Implemented │ MERGE pattern, prevents duplicates                                                            │
+  ├─────────────────────────────┼─────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Elasticsearch search        │ Implemented │ Indexed on every ontology write                                                               │
+  ├─────────────────────────────┼─────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Risk scoring (L3)           │ Implemented │ Company, Director, Project, Group scorers; Neo4j-backed                                       │
+  ├─────────────────────────────┼─────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ CIRP precursor model (L4)   │ Implemented │ 13-signal rule-based; Phase 2 XGBoost planned                                                 │
+  ├─────────────────────────────┼─────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Community detection         │ Implemented │ 6 algorithms (Louvain, LabelProp, Address, Director, Regulatory, Temporal)                    │
+  ├─────────────────────────────┼─────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Centrality / influence      │ Implemented │ PageRank, Betweenness, Degree, RegulatoryExposure, RiskWeighted                               │
+  ├─────────────────────────────┼─────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Graph path finding          │ Implemented │ Shortest path, all paths, path scoring                                                        │
+  ├─────────────────────────────┼─────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ NL query parsing            │ Conditional │ Anthropic API required; gracefully disabled without key                                       │
+  ├─────────────────────────────┼─────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Path narratives             │ Conditional │ Anthropic API required; fallback narrative used without key                                   │
+  ├─────────────────────────────┼─────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ RBAC (L3)                   │ Implemented │ 5 roles, permission matrix                                                                    │
+  ├─────────────────────────────┼─────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Audit logging               │ Implemented │ All writes logged                                                                             │
+  ├─────────────────────────────┼─────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Temporal change detection   │ Implemented │ deepdiff-based, detect() method                                                               │
+  ├─────────────────────────────┼─────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Kinetic actions (L3)        │ Implemented │ 5 action types, role-gated, WorkflowEngine                                                    │
+  ├─────────────────────────────┼─────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Anomaly detection (L3)      │ Implemented │ 5 detectors (director proliferation, CIRP contagion, filing compliance, etc.)                 │
+  ├─────────────────────────────┼─────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Project completion          │ Partial     │ Heuristic v0.3, no ML training; marked for L5 XGBoost upgrade                                 │
+  │ probability                 │             │                                                                                               │   
+  ├─────────────────────────────┼─────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ L2→L3 automatic trigger     │ Missing     │ layer2.clean.ready published but no consumer in L3                                            │   
+  ├─────────────────────────────┼─────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ L5–L10 layers               │ Not Present │ Not built — documented as planned only                                                        │
+  ├─────────────────────────────┼─────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ Frontend dashboards         │ Not Present │ No frontend code exists in repository                                                         │
+  ├─────────────────────────────┼─────────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤   
+  │ DB migrations auto-run      │ Manual      │ SQL files exist but no migration runner; must run psql manually                               │
+  └─────────────────────────────┴─────────────┴───────────────────────────────────────────────────────────────────────────────────────────────┘   
+                                                            
+  ---                                                                                                                                             
+  9. KNOWN GAPS & RISKS                                     
+                                                                                                                                                  
+  Critical:
+  1. L2→L3 broken link: layer2.clean.ready Kafka topic is published by Layer 2 but nothing consumes it. Layer 3 ingestion must be triggered       
+  manually. This breaks the automation chain.                                                                                                     
+  2. DB migrations not automated: 7 SQL migration files across layers with no runner (alembic, flyway, or script). First deployment requires
+  manual psql execution in the correct order.                                                                                                     
+  3. Single PostgreSQL instance: Layers 1, 2, and 3 share one PostgreSQL DB. No connection pooling (PgBouncer). Under load, this is a scalability 
+  bottleneck and a failure point.                                                                                                                
+  4. requirements.txt version drift: Root requirements.txt pins kafka-python==2.0.2 (broken on Python 3.12), sqlalchemy==1.4.49 (system has       
+  2.0.x), pandas==2.2.2 (system has 3.0.x), fastapi==0.104.0 (system has 0.136.x). The installed packages are newer than pinned versions — 
+  deployments from pip install -r requirements.txt will install incompatible versions and fail.                                                   
+  5. GSTIN checksum disabled: validate_gstin() uses pattern-only validation; the checksum algorithm in GSTINValidator._verify_checksum() produces
+  wrong results for known-valid test GSTINs. The class method should not be used directly.                                                        
+  6. Layer 4 CORS wide-open: allow_origins=["*"] in layer4/api/main.py — anyone on the network can call L4 API endpoints without credentials.     
+   
+  Architectural weaknesses:                                                                                                                       
+  7. No .env file in repo: .env is referenced throughout but not committed. Docker compose and configs have hardcoded dev defaults that would be
+  exposed in a misconfigured deployment.                                                                                                          
+  8. API key auth is optional: Both Layer 1 and Layer 4 warn but do not enforce auth. Production requires API_KEY env var to be set.
+  9. Layer 3 → 4 trigger is nightly-only: Real-time L3 changes invalidate L4 Redis cache instantly, but pre-computed L4 intelligence (centrality, 
+  clusters, CIRP scores) only refreshes at 1am. Newly ingested entities are invisible to L4 analytics until next batch.                           
+  10. Neo4j GDS dependency: Layer 4 clustering and centrality algorithms require Neo4j Graph Data Science plugin. Not all Neo4j 5.14 images       
+  include GDS; must use the enterprise/GDS-enabled image.                                                                                         
+  11. deepdiff dependency in L3: ChangeDetector requires deepdiff package, not listed in root requirements.txt.
+  12. Anthropic SDK in L4 requires API key at runtime: NarrativeGenerator and QueryParser import anthropic at module level — the package must be  
+  installed even if the API key is not set.                                                                                                       
+                                                                                                                                                  
+  Silent failure risks:                                                                                                                           
+  13. Kafka publish failures are silently swallowed: All Kafka producers log at WARNING/DEBUG and return False/None. If Kafka is down, data keeps
+  flowing but downstream layers receive no events — no alerting, no dead letter queue.                                                            
+  14. Cross-batch fingerprint cap: _persist_fingerprints() silently caps at 50,000 fingerprints per run. Batches exceeding 50,000 unique records
+  will have partial fingerprint coverage without any error raised.                                                                                
+  15. L3 BatchIngestor triggered manually: No guaranteed trigger from L2. If the operator forgets to run ingestion, Layer 3 silently falls behind
+  Layer 2.                                                                                                                                        
+                                                            
+  ---                                                                                                                                             
+  10. CURRENT SYSTEM CAPABILITIES                           
+                                 
+  What it can actually do today:
+                                                                                                                                                  
+  1. Ingest and profile raw data from 14 connectors (10 generic + 4 Indian), detect schema fingerprint, write Parquet to MinIO, publish           
+  Kafka/Redis events.                                                                                                                             
+  2. Execute YAML-defined pipelines — 28+ transforms, quality rules, exact/fuzzy/cross-batch deduplication, field-level lineage, error quarantine 
+  — on Parquet DataFrames.                                                                                                                        
+  3. Normalise Indian corporate identifiers — CIN, DIN, PAN, GSTIN, IFSC, state codes, PIN codes, Indian number formats (crore notation), Indian
+  dates (8 formats including MCA21 compact).                                                                                                      
+  4. Map processed data into a typed ontology graph — 12 object types, 8+ link types, schema-validated, written atomically to PostgreSQL + Neo4j +
+   Elasticsearch + Redis.                                                                                                                         
+  5. Score company, director, and project risk using Neo4j-backed signal queries (regulatory actions, CIRP status, director disqualification,
+  offshore exposure).                                                                                                                             
+  6. Predict CIRP (insolvency) risk using a 13-signal rule-based model with CRITICAL/HIGH/MEDIUM/LOW bands.
+  7. Detect anomalies — director proliferation, CIRP contagion, filing compliance failures, address clustering, regulatory recidivism.            
+  8. Run graph analytics nightly — Louvain/LabelPropagation communities, PageRank/Betweenness centrality, shared director/address detection,      
+  temporal velocity analysis.                                                                                                                     
+  9. Find connection paths between corporate entities with risk signal scoring.                                                                   
+  10. Generate plain-English narratives of entity connections (requires Anthropic API key).                                                       
+  11. Execute role-gated actions — flag companies, update project status, merge duplicate objects, create intelligence alerts.                    
+                                                                                                                                                  
+  Limitations:                                                                                                                                    
+  - No frontend — no dashboard, no UI of any kind exists in the repository                                                                        
+  - Requires Docker Compose infrastructure to run (Kafka, Neo4j, Elasticsearch, MinIO, Redis, PostgreSQL) — none are running in the current       
+  environment                                                                                                                              
+  - L2→L3 trigger gap means full pipeline automation requires manual intervention at the L3 boundary                                              
+  - All intelligence is rule-based heuristics; no ML models are trained (Layer 5 XGBoost is planned, not implemented)
+  - NL query and narrative features require Anthropic API key                                                                                     
+                                                                                                                                                  
+  ---                                                                                                                                             
+  11. HOW TO RUN THE SYSTEM                                                                                                                       
+                                                                                                                                                  
+  Prerequisites: Docker, Docker Compose, .env file          
+
+  Step 1: Create .env                                                                                                                             
+  POSTGRES_DB=infracore
+  POSTGRES_USER=infracore                                                                                                                         
+  POSTGRES_PASSWORD=infracore_dev_password                  
+  MINIO_ACCESS_KEY=infracore_minio        
+  MINIO_SECRET_KEY=infracore_minio_secret                                                                                                         
+  KAFKA_BOOTSTRAP_SERVERS=kafka:9092     
+  NEO4J_PASSWORD=infracore123                                                                                                                     
+                                                            
+  Step 2: Start infrastructure                                                                                                                    
+  cd /opt/php74/satorix/infracore_foundry                                                                                                         
+  docker compose up -d postgres minio redis kafka neo4j elasticsearch airflow-init
+  docker compose up -d  # start all services                                                                                                      
+                                                                                                                                                  
+  Step 3: Run database migrations (no auto-runner exists — manual)                                                                                
+  # Layer 1                                                                                                                                       
+  psql -U infracore -d infracore -f layer1_ingestion/registry/migrations/001_initial_schema.sql
+  psql -U infracore -d infracore -f layer1_ingestion/registry/migrations/002_column_fixes.sql                                                     
+                                                                                                                                                  
+  # Layer 2                                                                                                                                       
+  psql -U infracore -d infracore -f layer2_pipeline/migrations/001_l2_tables.sql                                                                  
+  psql -U infracore -d infracore -f layer2_pipeline/migrations/002_l2_dataset_versions.sql                                                        
+  psql -U infracore -d infracore -f layer2_pipeline/migrations/003_l2_batch_fingerprints.sql                                                      
+                                                                                                                                                  
+  # Layer 3                                                                                                                                       
+  psql -U infracore -d infracore -f layer3_ontology/schema_registry/migrations/001_ontology_schema.sql                                            
+                                                                                                      
+  # Layer 4                                                                                                                                       
+  psql -U infracore -d infracore -f layer4_graph_intelligence/migrations/l4_schema.sql
+                                                                                                                                                  
+  Step 4: Register a data source                                                                                                                  
+  curl -X POST http://localhost:8001/api/v1/sources \                                                                                             
+    -H "Content-Type: application/json" \                                                                                                         
+    -d '{"name": "mca21_company_master", "connector_type": "csv", "client_id": "infracore", "config": {...}}'                                     
+                                                                                                             
+  Step 5: Trigger sync                                                                                                                            
+  curl -X POST http://localhost:8001/api/v1/sync/{source_id}                                                                                      
+                                                                                                                                                  
+  Step 6: Layer 2 picks up automatically via Airflow DAG (runs every 15 min) or manual trigger:                                                   
+  curl -X POST http://localhost:8080/api/v1/dags/layer2_pipeline/dagRuns \                                                                        
+    -H "Content-Type: application/json" \                                 
+    -d '{"conf": {"client_id": "infracore", "batch_id": "...", "input_path": "..."}}'                                                             
+                                                                                                                                                  
+  Step 7: Trigger Layer 3 ingestion (manual — no automatic trigger from L2)                                                                       
+  curl -X POST http://localhost:8003/api/v1/ingest \                                                                                              
+    -H "Content-Type: application/json" \                                                                                                         
+    -d '{"client_id": "infracore"}'                                                                                                               
+                                                            
+  Step 8: Query Layer 3 API                                                                                                                       
+  curl http://localhost:8003/api/v1/objects/company/L45201MH2003PLC142301                                                                         
+  curl http://localhost:8003/api/v1/graph/L45201MH2003PLC142301/network  
+                                                                                                                                                  
+  Step 9: Query Layer 4 API (after nightly batch)                                                                                                 
+  curl http://localhost:8004/api/v1/network/expand/L45201MH2003PLC142301                                                                          
+  curl http://localhost:8004/api/v1/paths/shortest?from=CIN1&to=CIN2                                                                              
+  curl http://localhost:8004/api/v1/clusters/louvain/L45201MH2003PLC142301                                                                        
+                                                                                                                                                  
+  Run system tests (no infrastructure needed):                                                                                                    
+  cd /opt/php74/satorix/infracore_foundry                                                                                                         
+  python3 system_test.py                                                                                                                          
+  # → 128/128 PASS, Score: 100/100                                                                                                                
+                                                            
+  ---                                                                                                                                             
+  12. OUTPUT & DATA VISIBILITY
+                                                                                                                                                  
+  Raw ingested data:                                        
+  # List MinIO raw files                                                                                                                          
+  python3 -c "                                              
+  from minio import Minio                                                                                                                         
+  mc = Minio('localhost:9000', access_key='...', secret_key='...', secure=False)
+  for obj in mc.list_objects('raw-data', recursive=True):                                                                                         
+      print(obj.object_name, obj.size)                                                                                                            
+  "                                   
+  # Or via MinIO console: http://localhost:9001                                                                                                   
+                                                            
+  Processed data (Layer 2 output):                                                                                                                
+  python3 -c "                                              
+  import pandas as pd                                                                                                                             
+  df = pd.read_parquet('s3://processed-data/infracore/infracore_company_master/{run_id}.parquet',                                                 
+      storage_options={'endpoint_url': 'http://localhost:9000', ...})                            
+  print(df.head())                                                                                                                                
+  "                                                                                                                                               
+                                                                                                                                                  
+  Ontology data (PostgreSQL):                                                                                                                     
+  -- All companies                                                                                                                                
+  SELECT primary_key, properties->>'name', properties->>'status', properties->>'riskScore'
+  FROM ontology_objects WHERE object_type = 'company' AND is_deleted = FALSE LIMIT 20;                                                            
+                                                                                                                                                  
+  -- All links for a company                                                                                                                      
+  SELECT link_type, target_type, target_id, properties                                                                                            
+  FROM ontology_links WHERE source_id = 'L45201MH2003PLC142301';                                                                                  
+                                                                                                                                                  
+  -- Pipeline run history                                                                                                                         
+  SELECT run_id, status, records_input, records_output, duration_seconds
+  FROM l2_pipeline_runs ORDER BY started_at DESC LIMIT 10;                                                                                        
+                                                                                                                                                  
+  -- Cross-batch fingerprint count
+  SELECT pipeline_id, COUNT(*) FROM l2_batch_fingerprints GROUP BY pipeline_id;                                                                   
+                                                            
+  Neo4j graph (browser: http://localhost:7474):                                                                                                   
+  MATCH (c:Company {cin: 'L45201MH2003PLC142301'})          
+  OPTIONAL MATCH (c)<-[:DIRECTED]-(d:Director)                                                                                                    
+  RETURN c, d LIMIT 50                                      
+                                                                                                                                                  
+  MATCH p=shortestPath((a:Company {cin: $cin1})-[*..6]-(b:Company {cin: $cin2}))
+  RETURN p                                                                                                                                        
+                                                            
+  Elasticsearch (full-text search):                                                                                                               
+  curl http://localhost:9200/ontology_company/_search \     
+    -d '{"query": {"match": {"properties.name": "Infracore"}}}'
+                                                                                                                                                  
+  Layer 4 pre-computed scores (PostgreSQL):                                                                                                       
+  SELECT entity_id, betweenness, pagerank, composite_rank                                                                                         
+  FROM l4_influence_scores ORDER BY composite_rank LIMIT 20;                                                                                      
+                                                                                                                                                  
+  SELECT entity_id, cluster_type, cluster_id                
+  FROM l4_cluster_memberships WHERE cluster_type = 'louvain' LIMIT 20;                                                                            
+                                                                      
+  ---                                                                                                                                             
+  13. FINAL SYSTEM STATUS                                                                                                                         
+                         
+  Readiness Score: 82/100                                                                                                                         
+                                                                                                                                                  
+  Stability Level: STABLE BUT LIMITED
+                                                                                                                                                  
+  Verdict:                                                                                                                                        
+   
+  The codebase is substantially complete and architecturally coherent across 4 layers — 310 Python files, 25,604 lines, with real data pipelines, 
+  a typed ontology graph, graph analytics, and CIRP precursor modeling. The system passes 128/128 unit and integration logic tests without any
+  infrastructure running.                                                                                                                         
+                                                            
+  What it is not yet: a running production system. It has never been deployed. The infrastructure (Kafka, Neo4j, Elasticsearch, MinIO, Redis) is  
+  defined in Docker Compose but not currently running in this environment. The L2→L3 automation gap means the full pipeline requires manual
+  intervention at one key boundary. DB migrations are manual. The requirements.txt pins are stale and would cause installation failures on a fresh
+   environment. No frontend exists.                         
+
+  The system is a fully specified, code-complete data platform that needs deployment wiring, migration automation, and the L2→L3 trigger to close 
+  before it can run end-to-end autonomously.
+                                                                                                                                                  
+✻ Worked for 7m 49s                                         
+                                                                                          
+※ recap: Building India's Palantir-alternative Satorix platform. All 4 layers pass 128/128 system tests at 100/100. Next: wire the L2→L3 Kafka    
+  trigger so Layer 3 ingestion fires automatically when Layer 2 completes.  .
+  
