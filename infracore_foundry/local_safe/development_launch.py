@@ -1,4 +1,4 @@
-"""Contained development API launcher: local mutations, no external egress."""
+"""Development launcher: offline by default; focused Gemini has explicit opt-in egress."""
 import importlib
 import os
 import sys

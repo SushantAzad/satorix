@@ -733,7 +733,7 @@
         "./layer6_dashboard/backend:/workspace/app:ro",
         "./shared:/workspace/shared:ro",
         "./local_safe:/opt/satorix-safe:ro",
-        "./local_safe/fixtures:/workspace/fixtures:ro"
+        "./local_safe/fixtures:/workspace/local_safe/fixtures:ro"
       ]
     },
     "intelligence-dashboard": {

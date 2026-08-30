@@ -1,260 +1,123 @@
-"""
-Report Aggregator — orchestrates report generation via Layer 5,
-with caching in the l6_report_cache table.
-"""
+"""Persisted, owner- and tenant-scoped available-data due diligence."""
 import asyncio
-import logging
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from sqlalchemy.sql import text
+from shared.relationship_exposure import relationship_exposure
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from core.layer_clients import LayerClients
-
-logger = logging.getLogger(__name__)
-
-# Valid report types
-REPORT_TYPES = {
-    "corporate_due_diligence",
-    "regulatory_exposure",
-    "portfolio_health",
-    "peer_comparison",
-}
-
-_POLL_INTERVAL_S = 3.0
-_POLL_TIMEOUT_S = 120.0
+REPORT_TYPES = {"corporate_due_diligence"}
 
 
-# ---------------------------------------------------------------------------
-# Cache helpers (using SQLAlchemy text queries to avoid circular imports)
-# ---------------------------------------------------------------------------
-
-async def _get_cached_report(
-    db: AsyncSession, user_id: str, entity_type: str, entity_id: str, report_type: str
-) -> Optional[Dict]:
-    from sqlalchemy.sql import text
-    try:
-        result = await db.execute(
-            text(
-                """
-                SELECT id, report_content, generated_at, expires_at
-                FROM l6_report_cache
-                WHERE user_id = :user_id
-                  AND entity_type = :entity_type
-                  AND entity_id = :entity_id
-                  AND report_type = :report_type
-                  AND expires_at > NOW()
-                ORDER BY generated_at DESC
-                LIMIT 1
-                """
-            ),
-            {
-                "user_id": user_id,
-                "entity_type": entity_type,
-                "entity_id": entity_id,
-                "report_type": report_type,
-            },
-        )
-        row = result.fetchone()
-        if row:
-            return {
-                "report_id": str(row.id),
-                "status": "completed",
-                "report_content": row.report_content,
-                "generated_at": row.generated_at.isoformat(),
-                "expires_at": row.expires_at.isoformat(),
-                "cached": True,
-            }
-    except Exception as exc:
-        logger.warning("_get_cached_report failed: %s", exc)
-    return None
-
-
-async def _save_report_cache(
-    db: AsyncSession,
-    user_id: str,
-    entity_type: str,
-    entity_id: str,
-    report_type: str,
-    report_content: Dict,
-) -> str:
-    from sqlalchemy.sql import text
+async def _save_report_cache(db, user_id, entity_type, entity_id, report_type, content):
     report_id = str(uuid.uuid4())
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
     try:
-        await db.execute(
-            text(
-                """
-                INSERT INTO l6_report_cache
-                    (id, user_id, entity_type, entity_id, report_type,
-                     report_content, generated_at, expires_at)
-                VALUES
-                    (:id, :user_id, :entity_type, :entity_id, :report_type,
-                     :report_content::jsonb, NOW(), :expires_at)
-                """
-            ),
-            {
-                "id": report_id,
-                "user_id": user_id,
-                "entity_type": entity_type,
-                "entity_id": entity_id,
-                "report_type": report_type,
-                "report_content": __import__("json").dumps(report_content),
-                "expires_at": expires_at,
-            },
-        )
+        await db.execute(text("""
+            INSERT INTO l6_report_cache
+                (id, user_id, entity_type, entity_id, report_type,
+                 report_content, generated_at, expires_at)
+            VALUES (:id, :user_id, :entity_type, :entity_id, :report_type,
+                    CAST(:content AS jsonb), NOW(), :expires_at)
+        """), dict(id=report_id, user_id=user_id, entity_type=entity_type,
+                   entity_id=entity_id, report_type=report_type, content=json.dumps(content),
+                   expires_at=datetime.now(timezone.utc) + timedelta(hours=24)))
         await db.commit()
-    except Exception as exc:
-        logger.warning("_save_report_cache failed: %s", exc)
+    except Exception:
         await db.rollback()
+        raise
     return report_id
 
 
-async def _delete_report(db: AsyncSession, report_id: str, user_id: str) -> bool:
-    from sqlalchemy.sql import text
-    try:
-        result = await db.execute(
-            text(
-                "DELETE FROM l6_report_cache WHERE id = :id AND user_id = :user_id"
-            ),
-            {"id": report_id, "user_id": user_id},
-        )
-        await db.commit()
-        return result.rowcount > 0
-    except Exception as exc:
-        logger.warning("_delete_report failed: %s", exc)
-        await db.rollback()
-        return False
+async def _list_user_reports(db, user_id, client_id):
+    result = await db.execute(text("""
+        SELECT id, entity_type, entity_id, report_type, generated_at, expires_at
+        FROM l6_report_cache WHERE user_id = :user_id
+          AND report_content->>'client_id' = :client_id AND expires_at > NOW()
+        ORDER BY generated_at DESC LIMIT 50
+    """), dict(user_id=user_id, client_id=client_id))
+    return [dict(report_id=str(r.id), entity_type=r.entity_type, entity_id=r.entity_id,
+                 report_type=r.report_type, generated_at=r.generated_at.isoformat(),
+                 expires_at=r.expires_at.isoformat(), status="completed")
+            for r in result.fetchall()]
 
 
-async def _list_user_reports(db: AsyncSession, user_id: str) -> List[Dict]:
-    from sqlalchemy.sql import text
-    try:
-        result = await db.execute(
-            text(
-                """
-                SELECT id, entity_type, entity_id, report_type, generated_at, expires_at
-                FROM l6_report_cache
-                WHERE user_id = :user_id AND expires_at > NOW()
-                ORDER BY generated_at DESC
-                LIMIT 50
-                """
-            ),
-            {"user_id": user_id},
-        )
-        rows = result.fetchall()
-        return [
-            {
-                "report_id": str(r.id),
-                "entity_type": r.entity_type,
-                "entity_id": r.entity_id,
-                "report_type": r.report_type,
-                "generated_at": r.generated_at.isoformat(),
-                "expires_at": r.expires_at.isoformat(),
-                "status": "completed",
-            }
-            for r in rows
-        ]
-    except Exception as exc:
-        logger.warning("_list_user_reports failed: %s", exc)
-        return []
+async def poll_report(clients, db, user_id, report_id, client_id, **_):
+    result = await db.execute(text("""
+        SELECT * FROM l6_report_cache WHERE id = :id AND user_id = :user_id
+          AND report_content->>'client_id' = :client_id AND expires_at > NOW()
+    """), dict(id=report_id, user_id=user_id, client_id=client_id))
+    r = result.fetchone()
+    if not r:
+        return dict(report_id=report_id, status="unknown")
+    return dict(report_id=str(r.id), status="completed", report_content=r.report_content,
+                entity_type=r.entity_type, entity_id=r.entity_id, report_type=r.report_type,
+                generated_at=r.generated_at.isoformat(), expires_at=r.expires_at.isoformat())
 
 
-# ---------------------------------------------------------------------------
-# Main orchestration
-# ---------------------------------------------------------------------------
-
-async def generate_report(
-    clients: LayerClients,
-    db: AsyncSession,
-    user_id: str,
-    entity_type: str,
-    entity_id: str,
-    report_type: str,
-    depth: int = 2,
-) -> Dict:
-    """
-    Check cache first; if miss, trigger Layer 5 report generation.
-    Returns immediately with {report_id, status: "pending"} or cached result.
-    """
-    if report_type not in REPORT_TYPES:
-        return {
-            "error": f"Unknown report_type '{report_type}'. Valid: {sorted(REPORT_TYPES)}"
-        }
-
-    # Cache hit
-    cached = await _get_cached_report(db, user_id, entity_type, entity_id, report_type)
-    if cached:
-        logger.info("Report cache hit for %s/%s type=%s", entity_type, entity_id, report_type)
-        return cached
-
-    # Trigger L5 generation
-    gen_result = await clients.generate_report(entity_type, entity_id, report_type)
-    if gen_result is None:
-        return {
-            "report_id": None,
-            "status": "failed",
-            "error": "Layer 5 report service unavailable. Ensure Layer 5 is running at port 8005.",
-        }
-
-    report_id = gen_result.get("report_id") or gen_result.get("id")
-    l5_status = gen_result.get("status", "pending")
-
-    # If Layer 5 returned a completed report synchronously, cache it immediately
-    if l5_status == "completed":
-        report_content = (
-            gen_result.get("report")
-            or gen_result.get("report_content")
-            or {k: v for k, v in gen_result.items() if k != "report_id"}
-        )
-        saved_id = await _save_report_cache(
-            db, user_id, entity_type, entity_id, report_type, report_content
-        )
-        return {
-            "report_id": saved_id,
-            "status": "completed",
-            "entity_type": entity_type,
-            "entity_id": entity_id,
-            "report_type": report_type,
-        }
-
-    return {
-        "report_id": report_id,
-        "status": l5_status,
-        "entity_type": entity_type,
-        "entity_id": entity_id,
-        "report_type": report_type,
-    }
+async def _delete_report(db, report_id, user_id, client_id):
+    result = await db.execute(text("""
+        DELETE FROM l6_report_cache WHERE id = :id AND user_id = :user_id
+          AND report_content->>'client_id' = :client_id
+    """), dict(id=report_id, user_id=user_id, client_id=client_id))
+    await db.commit()
+    return result.rowcount > 0
 
 
-async def poll_report(
-    clients: LayerClients,
-    db: AsyncSession,
-    user_id: str,
-    report_id: str,
-    entity_type: Optional[str] = None,
-    entity_id: Optional[str] = None,
-    report_type: Optional[str] = None,
-) -> Dict:
-    """
-    Check report status from Layer 5; save to cache when completed.
-    """
-    result = await clients.get_report_status(report_id)
-    if result is None:
-        return {"report_id": report_id, "status": "unknown"}
-
-    if result.get("status") == "completed" and entity_type and entity_id and report_type:
-        content = result.get("content") or result.get("report") or result
-        saved_id = await _save_report_cache(
-            db, user_id, entity_type, entity_id, report_type, content
-        )
-        return {
-            "report_id": saved_id,
-            "status": "completed",
-            "report_content": content,
-            "cached": True,
-        }
-
-    return result
+async def generate_report(clients, db, user_id, entity_type, entity_id,
+                          report_type, depth=2, client_id=None):
+    if report_type not in REPORT_TYPES or not client_id:
+        raise ValueError("Supported report type and tenant context are required.")
+    # Fresh snapshots avoid hiding changed risk behind yesterday's cached report.
+    entity = await clients.get_entity(entity_type, entity_id, client_id=client_id)
+    if not entity:
+        raise LookupError("Entity not found or ontology unavailable; no report was created.")
+    network, risk = await asyncio.gather(
+        clients.get_network(entity_type, entity_id, depth=depth, client_id=client_id),
+        clients.get_risk_score(entity_type, entity_id, client_id=client_id))
+    props = entity.get("properties", entity)
+    synthetic = bool(props.get("synthetic"))
+    score = risk.get("risk_score") if risk else None
+    limitations = [
+        "Available-data snapshot only, not a completed independent due-diligence investigation.",
+        "No external filings, sanctions searches, financial verification or LLM analysis were performed.",
+        "Missing data and absent relationships do not establish low risk or regulatory clearance.",
+        f"Graph coverage is limited to loaded relationships within depth {depth}.",
+    ]
+    if synthetic:
+        limitations.insert(0, "SYNTHETIC TEST DATA — not real company findings or a production risk assessment.")
+    if network is None:
+        limitations.append("Network service unavailable; relationship coverage is unknown.")
+    if score is None:
+        limitations.append("Risk assessment unavailable; unknown is not zero.")
+    content = dict(
+        schema_version="due-diligence/v1", client_id=client_id,
+        title=f"Due Diligence — {props.get('name') or props.get('companyName') or entity_id}",
+        entity_type=entity_type, entity_id=entity_id, report_type=report_type,
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        synthetic=synthetic, coverage="partial", depth=depth,
+        sections={
+            "executive_summary": {
+                "assessment": "Available-data review only", "risk_score": score,
+                "risk_band": risk.get("risk_band", "NONE") if risk and score is not None else "NONE",
+                "explanation": props.get("riskExplanation") or "Recorded risk reproduced without independent validation.",
+            },
+            "entity_record": entity,
+            "relationship_exposure": relationship_exposure(entity_type, entity_id, network),
+            "risk_assessment": risk or {"status": "unavailable", "score": None},
+            "relationship_snapshot": network if network is not None else {"status": "unavailable"},
+            "provenance": {
+                "source": "Layer 3 ontology record and graph",
+                "record_version": props.get("_version"),
+                "record_updated_at": props.get("_updated_at"),
+                "note": "Source IDs and relationship evidence are retained above; original sources are not independently verified.",
+            },
+            "limitations": limitations,
+            "review_checklist": [
+                "Verify identity and source filings.",
+                "Confirm directors, ownership and beneficial owners.",
+                "Obtain current financial statements and validate risk inputs.",
+                "Perform authorized regulatory, litigation and sanctions checks.",
+            ],
+        })
+    report_id = await _save_report_cache(db, user_id, entity_type, entity_id, report_type, content)
+    return await poll_report(clients, db, user_id, report_id, client_id)

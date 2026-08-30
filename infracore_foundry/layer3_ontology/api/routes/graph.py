@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from typing import Any, Optional
 from core.client_context import get_client_id
 from storage.neo4j_store import Neo4jStore
+import os
 from intelligence.graph_intelligence.shared_attribute import shared_attribute_analyzer
 
 router = APIRouter(prefix="/graph", tags=["graph"])
@@ -15,7 +16,11 @@ async def get_network(
     depth: int = Query(default=2, ge=1, le=3),
     client_id: str = Depends(get_client_id),
 ) -> dict[str, Any]:
-    network = await _neo4j.get_network(object_type, primary_key, depth, client_id=client_id)
+    if os.getenv("SATORIX_FOCUSED") == "true":
+        from storage.focused_store import network as sql_network
+        network = await sql_network(object_type, primary_key, depth, client_id)
+    else:
+        network = await _neo4j.get_network(object_type, primary_key, depth, client_id=client_id)
     return {
         "object_type": object_type,
         "primary_key": primary_key,

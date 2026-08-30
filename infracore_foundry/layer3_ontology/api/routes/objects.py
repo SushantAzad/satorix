@@ -93,9 +93,8 @@ async def get_object(
     db: AsyncSession = Depends(get_db),
     client_id: str = Depends(get_client_id),
 ) -> dict[str, Any]:
-    cached = await _cache.get(object_type, primary_key)
-    if cached:
-        return object_security_filter.filter_object(object_type, cached, actor_role)
+    # The legacy object cache is not tenant-keyed. Authorize every detail read
+    # against the database rather than returning another tenant's cached object.
 
     result = await db.execute(
         text(
@@ -114,7 +113,6 @@ async def get_object(
     props["_version"] = row[1]
     props["_updated_at"] = str(row[2])
 
-    await _cache.set(object_type, primary_key, props)
     return object_security_filter.filter_object(object_type, props, actor_role)
 
 

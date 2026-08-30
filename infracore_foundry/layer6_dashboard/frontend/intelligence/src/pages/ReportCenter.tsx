@@ -5,19 +5,45 @@ import { apiClient } from '@shared/api/client'
 import { LoadingSpinner } from '@shared/components/LoadingSpinner'
 import { FileText, Download, Trash2 } from 'lucide-react'
 import type { Report } from '@shared/api/types'
+import { GeminiReview } from '../components/GeminiReview'
 
 const REPORT_TYPES = [
-  { id: 'corporate_due_diligence', label: 'Corporate Due Diligence', desc: 'Full entity profile with ownership, risk, and regulatory exposure' },
-  { id: 'regulatory_exposure', label: 'Regulatory Exposure', desc: 'SEBI, NCLT, MCA enforcement actions and timeline' },
-  { id: 'portfolio_health', label: 'Portfolio Health', desc: 'Group-level risk and financial health overview' },
-  { id: 'peer_comparison', label: 'Peer Comparison', desc: 'Benchmark against sector peers on key metrics' },
+  { id: 'corporate_due_diligence', label: 'Due Diligence — Available Data', desc: 'Recorded entity, risk, relationships, provenance and explicit coverage gaps' },
 ]
+
+function ReportValue({ value }: { value: unknown }) {
+  if (value === null || value === undefined) return <span className="text-gray-500">Not available</span>
+  if (Array.isArray(value)) return value.length
+    ? <ul className="space-y-2 list-disc pl-5">{value.map((v, i) => <li key={i}><ReportValue value={v} /></li>)}</ul>
+    : <span className="text-gray-500">No records returned (not proof of absence)</span>
+  if (typeof value === 'object') return <dl className="space-y-2">{Object.entries(value).map(([key, v]) =>
+    <div key={key}><dt className="font-medium text-gray-600">{key.replace(/_/g, ' ')}</dt><dd className="pl-3 break-words"><ReportValue value={v} /></dd></div>)}</dl>
+  return <span>{String(value)}</span>
+}
 
 export function ReportCenter() {
   const qc = useQueryClient()
   const [searchParams] = useSearchParams()
   const [form, setForm] = useState({ entityType: 'company', entityId: '', reportType: 'corporate_due_diligence' })
   const [error, setError] = useState('')
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const selected = useQuery({
+    queryKey: ['report', selectedId],
+    enabled: !!selectedId,
+    queryFn: () => apiClient.get(`/api/v1/reports/${selectedId}`).then(r => r.data),
+  })
+  const downloadMut = useMutation({
+    mutationFn: (id: string) => apiClient.get(`/api/v1/reports/${id}`).then(r => r.data),
+    onSuccess: (data) => {
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `due-diligence-${data.report_id}.json`
+      link.click()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    },
+    onError: () => setError('Could not download report. It may have expired; please regenerate it.'),
+  })
 
   useEffect(() => {
     const entity = searchParams.get('entity')
@@ -30,9 +56,9 @@ export function ReportCenter() {
     }
   }, [searchParams])
 
-  const { data: reports, isLoading } = useQuery<Report[]>({
+  const { data: reports, isLoading, isError: listError } = useQuery<Report[]>({
     queryKey: ['reports'],
-    queryFn: () => apiClient.get('/api/v1/reports').then(r => {
+    queryFn: () => apiClient.get('/api/v1/reports/').then(r => {
       const list = Array.isArray(r.data) ? r.data : []
       // Normalise backend field names to frontend Report type
       return list.map((item: any) => ({
@@ -51,7 +77,7 @@ export function ReportCenter() {
   const genMut = useMutation({
     mutationFn: () => apiClient.post('/api/v1/reports/generate', {
       entity_type: form.entityType,
-      entity_id: form.entityId,
+      entity_id: form.entityId.trim(),
       report_type: form.reportType,
     }).then(r => r.data),
     onSuccess: (data: any) => {
@@ -59,7 +85,7 @@ export function ReportCenter() {
       if (data?.status === 'failed' || data?.error) {
         setError(typeof data.error === 'string' ? data.error : 'Report generation failed — check Layer 5 is running.')
       } else {
-        setForm(f => ({ ...f, entityId: '' }))
+        setSelectedId(data.report_id)
       }
     },
     onError: (e: any) => {
@@ -76,13 +102,17 @@ export function ReportCenter() {
 
   const delMut = useMutation({
     mutationFn: (id: string) => apiClient.delete(`/api/v1/reports/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['reports'] }),
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ['reports'] })
+      if (selectedId === id) setSelectedId(null)
+    },
+    onError: () => setError('Could not delete report. Please retry.'),
   })
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8">
       <h1 className="text-2xl font-bold text-gray-900 mb-2">Report Center</h1>
-      <p className="text-sm text-gray-400 mb-8">Generate board-ready intelligence reports in seconds</p>
+      <p className="text-sm text-gray-500 mb-8">Generate a fresh available-data snapshot. Reports expire after 24 hours; download JSON to keep a copy. External verification, peer comparisons and portfolio reports are not included.</p>
 
       {/* Generate form */}
       <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm mb-8">
@@ -137,17 +167,33 @@ export function ReportCenter() {
         {error && <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
         <button
           onClick={() => { setError(''); genMut.mutate() }}
-          disabled={!form.entityId || genMut.isPending}
+          disabled={!form.entityId.trim() || genMut.isPending}
           className="px-5 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
           {genMut.isPending ? 'Generating...' : 'Generate Report'}
         </button>
         {genMut.isPending && <p className="text-xs text-gray-400 mt-2">This may take 15–30 seconds</p>}
       </div>
 
+      {selectedId && <section className="bg-white border border-gray-200 rounded-xl p-6 mb-8">
+        <div className="flex justify-between gap-3 mb-4"><h2 className="font-semibold">Report Preview</h2>
+          <button onClick={() => setSelectedId(null)}>Close</button></div>
+        {selected.isLoading ? <LoadingSpinner /> : selected.isError
+          ? <p role="alert" className="text-red-600">Report could not be loaded. It may have expired; generate a fresh report.</p>
+          : selected.data && <>
+            <h3 className="text-xl font-semibold mb-2">{selected.data.report_content.title}</h3>
+            <p className="text-sm text-gray-500 mb-3">{new Date(selected.data.generated_at).toLocaleString()} · Partial coverage</p>
+            {selected.data.report_content.synthetic && <p className="bg-amber-50 text-amber-900 p-3 mb-4">SYNTHETIC TEST DATA — not production findings</p>}
+            <button className="border rounded px-3 py-2 mb-4" disabled={downloadMut.isPending} onClick={() => downloadMut.mutate(selectedId)}>Download JSON</button>
+            {Object.entries(selected.data.report_content.sections || {}).map(([key, value]) =>
+              <section className="border-t pt-4 mt-4 text-sm" key={key}><h4 className="font-semibold text-base mb-3 capitalize">{key.replace(/_/g, ' ')}</h4><ReportValue value={value} /></section>)}
+            {!selected.data.report_content.sections?.gemini_ai_review && <GeminiReview key={selectedId} reportId={selectedId} />}
+          </>}
+      </section>}
+
       {/* Reports list */}
       <div>
         <h2 className="text-base font-semibold text-gray-900 mb-4">Recent Reports</h2>
-        {isLoading ? <LoadingSpinner /> : !reports?.length ? (
+        {listError ? <p role="alert" className="text-red-600">Could not load reports. Please refresh and retry.</p> : isLoading ? <LoadingSpinner /> : !reports?.length ? (
           <div className="text-center py-12 text-gray-400 border border-dashed border-gray-200 rounded-xl">
             <FileText className="h-8 w-8 mx-auto mb-2 opacity-40" />
             <p className="font-medium text-gray-900 mb-1">No reports yet</p>
@@ -171,13 +217,16 @@ export function ReportCenter() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  <button onClick={() => setSelectedId(r.id)} className="text-sm border rounded px-2 py-1">View</button>
                   {r.status === 'completed' && (
-                    <button className="p-1.5 border border-gray-200 rounded-lg text-gray-400 hover:text-gray-900 hover:border-gray-400 transition-colors">
+                    <button aria-label="Download report JSON" title="Download JSON" disabled={downloadMut.isPending} onClick={() => downloadMut.mutate(r.id)} className="p-1.5 border border-gray-200 rounded-lg text-gray-400 hover:text-gray-900 hover:border-gray-400 transition-colors">
                       <Download className="h-4 w-4" />
                     </button>
                   )}
                   <button
-                    onClick={() => delMut.mutate(r.id)}
+                    aria-label="Delete report"
+                    disabled={delMut.isPending}
+                    onClick={() => { if (window.confirm('Delete this saved report?')) delMut.mutate(r.id) }}
                     className="p-1.5 border border-gray-200 rounded-lg text-gray-400 hover:text-red-600 hover:border-red-200 transition-colors">
                     <Trash2 className="h-4 w-4" />
                   </button>

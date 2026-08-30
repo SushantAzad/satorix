@@ -11,12 +11,14 @@ export function AlertsDashboard() {
   const qc = useQueryClient()
   const [filter, setFilter] = useState<{ severity: string; acknowledged: string }>({ severity: '', acknowledged: 'false' })
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['alerts', filter],
+  const [offset, setOffset] = useState(0)
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ['alerts', filter, offset],
     queryFn: () => alertsApi.list({
       severity: filter.severity || undefined,
       acknowledged: filter.acknowledged === '' ? undefined : filter.acknowledged === 'true',
       limit: 100,
+      offset,
     }),
     refetchInterval: 30_000,
   })
@@ -25,6 +27,8 @@ export function AlertsDashboard() {
     mutationFn: alertsApi.acknowledge,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['alerts'] }),
   })
+  const scanMut = useMutation({ mutationFn: alertsApi.scan,
+    onSuccess: () => { setOffset(0); qc.invalidateQueries({ queryKey: ['alerts'] }) } })
 
   const stats = data ? {
     total: data.total,
@@ -40,9 +44,12 @@ export function AlertsDashboard() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Intelligence Alerts</h1>
-          <p className="text-sm text-gray-400 mt-1">Real-time signals from across the ontology</p>
+          <p className="text-sm text-gray-400 mt-1">On-demand review of recorded company risk and direct relationship exposure. Not a finding of wrongdoing.</p>
+          <p className="text-sm mt-2">{data?.last_scan ? `Last successful scan: ${new Date(data.last_scan).toLocaleString()}` : 'No successful scan recorded. Run a scan after importing or changing data.'}</p>
         </div>
+        <button className="border rounded px-4 py-2" disabled={scanMut.isPending} onClick={() => scanMut.mutate()}>{scanMut.isPending ? 'Scanning…' : 'Run signal scan'}</button>
       </div>
+      {(isError || scanMut.isError || ackMut.isError) && <p role="alert" className="text-red-600 mb-4">{isError ? 'Alerts could not be loaded.' : scanMut.isError ? 'Scan failed. Previous alerts have not been replaced.' : 'Acknowledgement failed.'} Check permissions and service availability. <button onClick={() => refetch()}>Reload</button></p>}
 
       {/* Stats */}
       {stats && (
@@ -65,7 +72,7 @@ export function AlertsDashboard() {
       <div className="flex items-center gap-3 mb-6">
         <select
           value={filter.severity}
-          onChange={e => setFilter(f => ({ ...f, severity: e.target.value }))}
+          onChange={e => { setOffset(0); setFilter(f => ({ ...f, severity: e.target.value })) }}
           className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:border-gray-400 bg-white">
           <option value="">All Severities</option>
           <option value="CRITICAL">Critical</option>
@@ -75,7 +82,7 @@ export function AlertsDashboard() {
         </select>
         <select
           value={filter.acknowledged}
-          onChange={e => setFilter(f => ({ ...f, acknowledged: e.target.value }))}
+          onChange={e => { setOffset(0); setFilter(f => ({ ...f, acknowledged: e.target.value })) }}
           className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:border-gray-400 bg-white">
           <option value="false">Unacknowledged</option>
           <option value="true">Acknowledged</option>
@@ -84,10 +91,10 @@ export function AlertsDashboard() {
       </div>
 
       {/* Alerts list */}
-      {!data?.alerts.length ? (
+      {isError ? null : !data?.alerts.length ? (
         <div className="text-center py-16 text-gray-400">
           <p className="text-lg font-medium text-gray-900 mb-1">No alerts found</p>
-          <p className="text-sm">All clear for selected filters</p>
+          <p className="text-sm">No matching recorded signals. This does not establish absence of risk.</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -128,6 +135,7 @@ export function AlertsDashboard() {
                   {!a.isAcknowledged && (
                     <button
                       onClick={() => ackMut.mutate(a.alertId)}
+                      disabled={ackMut.isPending}
                       className="px-3 py-1.5 border border-gray-300 text-xs text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
                       Acknowledge
                     </button>
@@ -139,6 +147,7 @@ export function AlertsDashboard() {
           ))}
         </div>
       )}
+      <div className="flex gap-4 mt-4"><button disabled={!offset} onClick={() => setOffset(Math.max(0, offset - 100))}>Previous</button><button disabled={offset + 100 >= (data?.matching ?? data?.total ?? 0)} onClick={() => setOffset(offset + 100)}>Next</button></div>
     </div>
   )
 }

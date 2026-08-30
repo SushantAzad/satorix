@@ -1,5 +1,6 @@
 from typing import Any
 import logging
+import os
 from core.elasticsearch_client import es_client, PLATFORM_GLOBAL
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,9 @@ class ElasticsearchStore:
         size: int = 50,
         client_id: str = PLATFORM_GLOBAL,
     ) -> list[dict[str, Any]]:
+        if os.getenv("SATORIX_FOCUSED") == "true":
+            from storage.focused_store import search
+            return await search(query, size, client_id, object_types, filters)
         return await es_client.search(query, object_types, filters, size, client_id)
 
     async def delete_object(self, object_type: str, primary_key: str) -> None:

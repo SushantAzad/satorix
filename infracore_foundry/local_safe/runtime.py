@@ -81,13 +81,18 @@ def install():
         return
     if os.environ.get("LOCAL_SAFE_MODE", "true").lower() != "true":
         raise RuntimeError("Safe launcher refuses LOCAL_SAFE_MODE=false")
+    gemini_opt_in = all(os.environ.get(k) == 'true' for k in
+                       ('DEVELOPMENT_MODE', 'SATORIX_FOCUSED', 'GEMINI_ENABLED', 'SATORIX_GEMINI_EGRESS'))
+    if gemini_opt_in:
+        HOST_PORTS['generativelanguage.googleapis.com'] = {443}
     for key in list(os.environ):
         if key.lower().endswith("_proxy"):
             os.environ.pop(key, None)
     for key in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY",
                 "GROQ_API_KEY", "HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "AWS_ACCESS_KEY_ID",
                 "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS"):
-        os.environ.pop(key, None)
+        if key != 'GEMINI_API_KEY' or not gemini_opt_in:
+            os.environ.pop(key, None)
     for key in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE",
                 "HF_HUB_DISABLE_TELEMETRY", "DO_NOT_TRACK", "AWS_EC2_METADATA_DISABLED"):
         os.environ[key] = "1" if key != "AWS_EC2_METADATA_DISABLED" else "true"

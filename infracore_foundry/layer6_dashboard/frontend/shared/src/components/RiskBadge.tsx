@@ -19,14 +19,14 @@ export function RiskBadge({ score, band, size = 'md', showScore = true }: Props)
   )
   if (size === 'lg') return (
     <div className="flex flex-col items-center">
-      <span className={`text-5xl font-bold tabular-nums ${c.text}`}>{score ?? '—'}</span>
+      <span className={`text-5xl font-bold tabular-nums ${c.text}`}>{band === 'NONE' ? '—' : score ?? '—'}</span>
       <span className={`mt-1 px-3 py-1 rounded-full text-sm font-semibold border ${c.bg} ${c.text}`}>{c.label}</span>
     </div>
   )
   return (
     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-semibold border ${c.bg} ${c.text}`}>
       <span className={`w-2 h-2 rounded-full ${c.dot}`} />
-      {showScore && score !== undefined ? score : ''} {c.label}
+      {showScore && band !== 'NONE' && score !== undefined ? score : ''} {c.label}
     </span>
   )
 }

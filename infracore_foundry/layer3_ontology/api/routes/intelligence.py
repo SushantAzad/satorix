@@ -10,6 +10,7 @@ from intelligence.risk_scoring.engine import risk_scoring_engine
 from intelligence.risk_scoring.group_scorer import group_scorer
 from kinetic.functions.cirp_contagion import assessCIRPContagionRisk
 from storage.object_data_funnel import object_data_funnel
+from core.client_context import get_client_id
 
 router = APIRouter(prefix="/intelligence", tags=["intelligence"])
 
@@ -19,29 +20,30 @@ async def get_risk_score(
     object_type: str,
     primary_key: str,
     db: AsyncSession = Depends(get_db),
+    client_id: str = Depends(get_client_id),
 ) -> dict[str, Any]:
     result = await db.execute(
-        text("SELECT properties FROM ontology_objects WHERE object_type = :ot AND primary_key = :pk AND is_deleted = FALSE"),
-        {"ot": object_type.lower(), "pk": primary_key},
+        text("SELECT properties FROM ontology_objects WHERE object_type = :ot AND primary_key = :pk AND client_id = :client_id AND is_deleted = FALSE"),
+        {"ot": object_type.lower(), "pk": primary_key, "client_id": client_id},
     )
     row = result.first()
     if not row:
         raise HTTPException(status_code=404, detail=f"{object_type}/{primary_key} not found")
 
     props = row[0] if isinstance(row[0], dict) else json.loads(row[0] or "{}")
-    risk_score = props.get("riskScore", 0) or 0
+    risk_score = props.get("riskScore")
     risk_flags = props.get("riskFlags", [])
     if isinstance(risk_flags, str):
         risk_flags = risk_flags.split(",") if risk_flags else []
 
-    band = "LOW" if risk_score < 40 else ("MEDIUM" if risk_score < 70 else "HIGH")
+    band = "NONE" if risk_score is None else ("LOW" if risk_score < 40 else ("MEDIUM" if risk_score < 70 else "HIGH"))
     return {
         "object_type": object_type,
         "primary_key": primary_key,
         "risk_score": risk_score,
         "risk_band": band,
         "risk_flags": risk_flags,
-        "color": {"LOW": "green", "MEDIUM": "orange", "HIGH": "red"}[band],
+        "color": {"NONE": "gray", "LOW": "green", "MEDIUM": "orange", "HIGH": "red"}[band],
     }
 
 

@@ -2,6 +2,7 @@
 Layer 6 Redis client — async connection, cache helpers.
 """
 import json
+import os
 import logging
 from typing import Any, Dict, Optional
 
@@ -48,6 +49,8 @@ async def cache_response(key: str, data: Any, ttl: int = 300) -> None:
     Serialise *data* to JSON and store it in Redis under *key* with a TTL of
     *ttl* seconds (default 5 minutes).
     """
+    if os.getenv("SATORIX_FOCUSED") == "true":
+        return
     try:
         client = await get_redis()
         await client.setex(key, ttl, json.dumps(data, default=str))
@@ -59,6 +62,8 @@ async def get_cached(key: str) -> Optional[Dict]:
     """
     Return the cached value for *key*, or None if absent / on error.
     """
+    if os.getenv("SATORIX_FOCUSED") == "true":
+        return None
     try:
         client = await get_redis()
         raw = await client.get(key)

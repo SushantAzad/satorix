@@ -11,6 +11,7 @@ Multi-tenancy:
   that Client A can never see Client B's private data.
 """
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -238,6 +239,8 @@ class LayerClients:
         client_id: str = PLATFORM_GLOBAL,
     ) -> Optional[Dict]:
         """GET /graph/network/{entity_type}/{entity_id} from Layer 4."""
+        if os.getenv("SATORIX_FOCUSED") == "true":
+            return None
         try:
             resp = await self.l4_client.get(
                 f"/graph/network/{entity_type}/{entity_id}",
@@ -258,6 +261,8 @@ class LayerClients:
         client_id: str = PLATFORM_GLOBAL,
     ) -> Optional[Dict]:
         """GET /intelligence/influence/{entity_type}/{entity_id} from Layer 4."""
+        if os.getenv("SATORIX_FOCUSED") == "true":
+            return None
         try:
             resp = await self.l4_client.get(
                 f"/intelligence/influence/{entity_type}/{entity_id}",
@@ -277,6 +282,8 @@ class LayerClients:
 
     async def get_cirp_prediction(self, cin: str) -> Optional[Dict]:
         """GET /api/v1/predictions/cirp/{cin} from Layer 5."""
+        if os.getenv("SATORIX_FOCUSED") == "true":
+            return None
         try:
             resp = await self.l5_client.get(f"/api/v1/predictions/cirp/{cin}")
             resp.raise_for_status()
@@ -287,6 +294,8 @@ class LayerClients:
 
     async def get_project_prediction(self, project_id: str) -> Optional[Dict]:
         """GET /api/v1/predictions/project/{project_id} from Layer 5."""
+        if os.getenv("SATORIX_FOCUSED") == "true":
+            return None
         try:
             resp = await self.l5_client.get(f"/api/v1/predictions/project/{project_id}")
             resp.raise_for_status()
@@ -297,6 +306,8 @@ class LayerClients:
 
     async def get_trends(self, entity_id: str, entity_type: str = "company") -> Optional[Dict]:
         """GET /api/v1/analytics/trends/{entity_type}/{entity_id} from Layer 5."""
+        if os.getenv("SATORIX_FOCUSED") == "true":
+            return None
         try:
             resp = await self.l5_client.get(f"/api/v1/analytics/trends/{entity_type}/{entity_id}")
             resp.raise_for_status()
@@ -307,6 +318,8 @@ class LayerClients:
 
     async def get_benchmark(self, entity_id: str, entity_type: str = "company") -> Optional[Dict]:
         """GET /api/v1/analytics/benchmarks/{entity_type}/{entity_id} from Layer 5."""
+        if os.getenv("SATORIX_FOCUSED") == "true":
+            return None
         try:
             resp = await self.l5_client.get(f"/api/v1/analytics/benchmarks/{entity_type}/{entity_id}")
             resp.raise_for_status()
@@ -322,6 +335,8 @@ class LayerClients:
         context: Dict,
     ) -> Optional[str]:
         """POST /api/v1/llm/entity-intelligence to Layer 5; returns the narrative string."""
+        if os.getenv("SATORIX_FOCUSED") == "true":
+            return None
         try:
             resp = await self.l5_client.post(
                 "/api/v1/llm/entity-intelligence",
@@ -337,44 +352,6 @@ class LayerClients:
             )
             return None
 
-    async def generate_report(
-        self,
-        entity_type: str,
-        entity_id: str,
-        report_type: str,
-    ) -> Optional[Dict]:
-        """POST /api/v1/reports/generate to Layer 5."""
-        try:
-            resp = await self.l5_client.post(
-                "/api/v1/reports/generate",
-                json={
-                    "entity_type": entity_type,
-                    "entity_id": entity_id,
-                    "report_type": report_type,
-                },
-                timeout=180.0,
-            )
-            resp.raise_for_status()
-            return resp.json()
-        except Exception as exc:
-            logger.warning(
-                "generate_report(%s, %s, %s) failed: %s",
-                entity_type,
-                entity_id,
-                report_type,
-                exc,
-            )
-            return None
-
-    async def get_report_status(self, report_id: str) -> Optional[Dict]:
-        """GET /api/v1/reports/{report_id} from Layer 5."""
-        try:
-            resp = await self.l5_client.get(f"/api/v1/reports/{report_id}")
-            resp.raise_for_status()
-            return resp.json()
-        except Exception as exc:
-            logger.warning("get_report_status(%s) failed: %s", report_id, exc)
-            return None
 
     async def get_model_performance(self) -> Optional[Dict]:
         """GET /api/v1/observability/metrics from Layer 5."""

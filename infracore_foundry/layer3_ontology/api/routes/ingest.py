@@ -1,11 +1,32 @@
 import uuid
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, HTTPException, Depends
+from core.client_context import get_client_id
 from typing import Any
 from ingestion.batch_ingestor import batch_ingestor
 
 router = APIRouter(prefix="/ingest", tags=["ingestion"])
 
 _running_ingest_jobs: dict[str, Any] = {}
+
+
+@router.post("/csv")
+async def csv_import(body: dict[str, Any], client_id: str = Depends(get_client_id)):
+    from ingestion.csv_import import process_import
+    try:
+        return await process_import(body, client_id)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except (ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(422, "Invalid import payload") from exc
+
+
+@router.post("/risk-scenarios")
+async def ingest_risk_scenarios():
+    from ingestion.risk_scenarios import load_risk_scenarios
+    try:
+        return await load_risk_scenarios()
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
 
 
 @router.post("/fixture")

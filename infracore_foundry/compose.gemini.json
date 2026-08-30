@@ -1,0 +1,11 @@
+{
+  "services": {
+    "layer6-api": {
+      "env_file": [".env.gemini"],
+      "environment": {"GEMINI_ENABLED": "true", "SATORIX_GEMINI_EGRESS": "true"},
+      "dns": ["8.8.8.8", "1.1.1.1"],
+      "networks": {"local-safe": {}, "gemini-egress": {"gw_priority": 1}}
+    }
+  },
+  "networks": {"gemini-egress": {"driver": "bridge"}}
+}

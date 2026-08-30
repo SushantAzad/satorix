@@ -3,7 +3,7 @@ import { useNavigate, Link, useLocation } from 'react-router-dom'
 import { Bell, Search, LogOut, Database, Brain } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '@shared/store/authStore'
-import { useAlertStore } from '@shared/store/alertStore'
+import { alertsApi } from '@shared/api/alerts'
 import { entitiesApi } from '@shared/api/entities'
 import { RiskBadge } from '@shared/components/RiskBadge'
 import type { SearchResult } from '@shared/api/types'
@@ -15,7 +15,8 @@ export function Navigation() {
   const nav = useNavigate()
   const location = useLocation()
   const { user, clearAuth } = useAuthStore()
-  const unreadCount = useAlertStore(s => s.unacknowledgedCount)
+  const alertSummary = useQuery({ queryKey: ['alerts', 'summary'], queryFn: alertsApi.getSummary, refetchInterval: 30000 })
+  const unreadCount = alertSummary.data?.unacknowledged ?? 0
   const [q, setQ] = useState('')
   const [open, setOpen] = useState(false)
   const [userMenu, setUserMenu] = useState(false)
@@ -102,15 +103,15 @@ export function Navigation() {
 
       {/* Sources link */}
       <Link
-        to="/sources"
+        to="/imports"
         className={`flex items-center gap-1.5 px-3 h-8 rounded-lg text-sm font-medium transition-colors ${
-          location.pathname === '/sources'
+          location.pathname === '/imports'
             ? 'bg-gray-100 text-gray-900'
             : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'
         }`}
       >
         <Database className="h-4 w-4" />
-        <span>Sources</span>
+        <span>CSV Import</span>
       </Link>
 
       {/* Alerts */}

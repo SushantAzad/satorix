@@ -3,6 +3,7 @@ ObjectDataFunnel — the sole write path for all ontology data.
 Nothing else writes to Neo4j, Elasticsearch, PostgreSQL, or Redis directly.
 """
 import hashlib
+import os
 import json
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -135,6 +136,10 @@ class ObjectDataFunnel:
                     new_value=change.new_value,
                 ))
 
+        if os.getenv("SATORIX_FOCUSED") == "true":
+            return WriteResult(success=True, object_type=object_type, object_id=primary_key,
+                               version=new_version, changes=changes)
+
         # 3. Write to Neo4j (graph)
         try:
             await self._neo4j_store.upsert_node(object_type, primary_key, data, client_id)
@@ -202,6 +207,9 @@ class ObjectDataFunnel:
                 ))
                 await db.commit()
 
+                if os.getenv("SATORIX_FOCUSED") == "true":
+                    return WriteResult(success=True, object_type=link_type,
+                                       object_id=f"{source_id}->{target_id}")
                 # Write to Neo4j
                 try:
                     await self._neo4j_store.upsert_relationship(
@@ -332,6 +340,22 @@ class ObjectDataFunnel:
         props_json = json.dumps(properties, default=str)
         inferred_by = properties.get("inferredBy")
         confidence = properties.get("inferenceConfidence")
+        # The base schema has no unique relationship key. Serialize this key
+        # and update existing records before inserting, so re-imports cannot
+        # add another copy or leave PostgreSQL behind the graph properties.
+        identity = dict(link_type=link_type, source_type=source_type, source_id=source_id,
+                        target_type=target_type, target_id=target_id, client_id=client_id)
+        await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+                         {"key": json.dumps(identity, sort_keys=True)})
+        updated = await db.execute(text("""
+            UPDATE ontology_links SET properties = properties || CAST(:properties AS jsonb),
+                is_inferred=:is_inferred, updated_at=NOW()
+            WHERE link_type=:link_type AND source_type=:source_type AND source_id=:source_id
+              AND target_type=:target_type AND target_id=:target_id AND client_id=:client_id
+            RETURNING source_id
+        """), {**identity, "properties": props_json, "is_inferred": is_inferred})
+        if updated.first() is not None:
+            return
         await db.execute(
             text("""
                 INSERT INTO ontology_links

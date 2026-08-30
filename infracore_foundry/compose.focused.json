@@ -1,0 +1,288 @@
+{
+  "name": "satorix-development",
+  "services": {
+    "postgres": {
+      "image": "pgvector/pgvector:pg15",
+      "environment": {
+        "POSTGRES_DB": "satorix_safe",
+        "POSTGRES_USER": "satorix_safe",
+        "POSTGRES_PASSWORD": "LocalFixturePasswordOnly123"
+      },
+      "ports": [
+        "127.0.0.1:5432:5432"
+      ],
+      "volumes": [
+        "postgres_data:/var/lib/postgresql/data"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD-SHELL",
+          "pg_isready -U satorix_safe -d satorix_safe"
+        ],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 5
+      },
+      "restart": "no",
+      "pull_policy": "never",
+      "networks": [
+        "local-safe"
+      ],
+      "dns": [
+        "127.0.0.1"
+      ],
+      "cap_drop": [
+        "NET_RAW"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ]
+    },
+    "layer3-api": {
+      "command": [
+        "api.main:app",
+        "8003"
+      ],
+      "ports": [
+        "127.0.0.1:8003:8003"
+      ],
+      "environment": {
+        "NEO4J_URI": "bolt://neo4j:7687",
+        "NEO4J_USER": "neo4j",
+        "NEO4J_PASSWORD": "LocalFixtureNeo4jOnly123",
+        "ELASTICSEARCH_URL": "http://elasticsearch:9200",
+        "POSTGRES_HOST": "postgres",
+        "POSTGRES_PORT": "5432",
+        "POSTGRES_DB": "satorix_safe",
+        "POSTGRES_USER": "satorix_safe",
+        "POSTGRES_PASSWORD": "LocalFixturePasswordOnly123",
+        "MINIO_ENDPOINT": "minio:9000",
+        "MINIO_ACCESS_KEY": "localfixture",
+        "MINIO_SECRET_KEY": "LocalFixtureMinioOnly123",
+        "MINIO_SECURE": "false",
+        "REDIS_URL": "redis://redis:6379/0",
+        "API_KEY": "local-fixture-api-key-not-production",
+        "CORS_ORIGINS": "[\"http://localhost:3000\",\"http://localhost:3001\",\"http://localhost:3002\"]",
+        "LAYER3_API_PORT": "8003",
+        "LOG_LEVEL": "INFO",
+        "SCHEMA_VERSION": "1.0.0",
+        "RISK_SCORE_BATCH_SIZE": "100",
+        "INGEST_CHUNK_SIZE": "1000",
+        "LOCAL_SAFE_MODE": "true",
+        "ENABLE_EXTERNAL_CONNECTORS": "false",
+        "ENABLE_EXTERNAL_WEBHOOKS": "false",
+        "ENABLE_EXTERNAL_LLM": "false",
+        "ENABLE_SCHEDULED_SYNC": "false",
+        "ENABLE_SCRAPING": "false",
+        "USE_MOCK_DATA": "true",
+        "HF_HUB_OFFLINE": "1",
+        "TRANSFORMERS_OFFLINE": "1",
+        "HF_DATASETS_OFFLINE": "1",
+        "HF_HUB_DISABLE_TELEMETRY": "1",
+        "DO_NOT_TRACK": "1",
+        "AWS_EC2_METADATA_DISABLED": "true",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONUNBUFFERED": "1",
+        "LLM_PROVIDER": "disabled",
+        "PYTHONPATH": "/opt/satorix-safe:/workspace/app:/workspace:/workspace/layer3_ontology",
+        "SANDBOX_API_KEY": "",
+        "GOOGLE_CREDENTIALS_PATH": "/nonexistent/disabled.json",
+        "HOME": "/tmp/no-credentials",
+        "DEVELOPMENT_MODE": "true",
+        "SATORIX_FOCUSED": "true"
+      },
+      "restart": "no",
+      "image": "infracore_foundry-layer3-api:latest",
+      "pull_policy": "never",
+      "networks": [
+        "local-safe"
+      ],
+      "dns": [
+        "127.0.0.1"
+      ],
+      "cap_drop": [
+        "NET_RAW"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "working_dir": "/workspace/app",
+      "entrypoint": [
+        "python",
+        "/opt/satorix-safe/development_launch.py"
+      ],
+      "volumes": [
+        "./layer3_ontology:/workspace/app:ro",
+        "./shared:/workspace/shared:ro",
+        "./local_safe:/opt/satorix-safe:ro",
+        "./local_safe/fixtures:/workspace/local_safe/fixtures:ro"
+      ],
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        }
+      }
+    },
+    "layer6-api": {
+      "command": [
+        "api.main:app",
+        "8006"
+      ],
+      "ports": [
+        "127.0.0.1:8006:8006"
+      ],
+      "environment": {
+        "POSTGRES_URL": "postgresql+asyncpg://satorix_safe:LocalFixturePasswordOnly123@postgres:5432/satorix_safe",
+        "REDIS_URL": "redis://redis:6379/1",
+        "LAYER1_API_URL": "http://layer1-api:8001",
+        "LAYER2_API_URL": "http://layer2-api:8002",
+        "LAYER3_API_URL": "http://layer3-api:8003",
+        "LAYER4_API_URL": "http://layer4-api:8004",
+        "LAYER5_API_URL": "http://layer5-api:8005",
+        "KAFKA_BOOTSTRAP_SERVERS": "kafka:9092",
+        "LAYER6_API_PORT": "8006",
+        "LAYER6_WS_PORT": "8007",
+        "API_KEY": "local-fixture-api-key-not-production",
+        "JWT_SECRET_KEY": "local-fixture-jwt-signing-key-not-production",
+        "DEFAULT_ADMIN_EMAIL": "admin@satorix.internal",
+        "DEFAULT_ADMIN_PASSWORD": "LocalFixtureAdminOnly123",
+        "DEFAULT_ADMIN_CLIENT_ID": "LOCAL_SYNTHETIC_DEMO",
+        "CORS_ORIGINS": "[\"http://localhost:3000\",\"http://localhost:3001\",\"http://localhost:3002\"]",
+        "LOG_LEVEL": "INFO",
+        "LLM_PROVIDER": "disabled",
+        "ANTHROPIC_MODEL": "",
+        "OLLAMA_BASE_URL": "",
+        "OLLAMA_MODEL": "",
+        "OLLAMA_TIMEOUT_SECONDS": "",
+        "LOCAL_SAFE_MODE": "true",
+        "ENABLE_EXTERNAL_CONNECTORS": "false",
+        "ENABLE_EXTERNAL_WEBHOOKS": "false",
+        "ENABLE_EXTERNAL_LLM": "false",
+        "ENABLE_SCHEDULED_SYNC": "false",
+        "ENABLE_SCRAPING": "false",
+        "USE_MOCK_DATA": "true",
+        "HF_HUB_OFFLINE": "1",
+        "TRANSFORMERS_OFFLINE": "1",
+        "HF_DATASETS_OFFLINE": "1",
+        "HF_HUB_DISABLE_TELEMETRY": "1",
+        "DO_NOT_TRACK": "1",
+        "AWS_EC2_METADATA_DISABLED": "true",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONPATH": "/opt/satorix-safe:/workspace/app:/workspace:/workspace/layer3_ontology",
+        "SANDBOX_API_KEY": "",
+        "GOOGLE_CREDENTIALS_PATH": "/nonexistent/disabled.json",
+        "HOME": "/tmp/no-credentials",
+        "DEVELOPMENT_MODE": "true",
+        "SATORIX_FOCUSED": "true"
+      },
+      "restart": "no",
+      "image": "infracore_foundry-layer6-api:latest",
+      "pull_policy": "never",
+      "networks": [
+        "local-safe"
+      ],
+      "dns": [
+        "127.0.0.1"
+      ],
+      "cap_drop": [
+        "NET_RAW"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "working_dir": "/workspace/app",
+      "entrypoint": [
+        "python",
+        "/opt/satorix-safe/development_launch.py"
+      ],
+      "volumes": [
+        "./layer6_dashboard/backend:/workspace/app:ro",
+        "./shared:/workspace/shared:ro",
+        "./local_safe:/opt/satorix-safe:ro",
+        "./local_safe/fixtures:/workspace/local_safe/fixtures:ro"
+      ],
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        }
+      }
+    },
+    "intelligence-dashboard": {
+      "image": "node:20-alpine",
+      "working_dir": "/frontend/intelligence",
+      "command": [
+        "intelligence",
+        "3000"
+      ],
+      "ports": [
+        "127.0.0.1:3000:3000"
+      ],
+      "volumes": [
+        "./layer6_dashboard/frontend:/frontend:ro",
+        "frontend_shared_modules:/frontend/node_modules:ro",
+        "intelligence_node_modules:/frontend/intelligence/node_modules:ro",
+        "./local_safe:/opt/satorix-safe:ro"
+      ],
+      "environment": {
+        "VITE_API_PROXY_TARGET": "http://layer6-api:8006",
+        "VITE_WS_PROXY_TARGET": "ws://layer6-api:8006",
+        "CHOKIDAR_USEPOLLING": "true",
+        "VITE_LOCAL_SAFE_MODE": "true",
+        "VITE_API_URL": "/",
+        "VITE_WS_URL": "",
+        "npm_config_offline": "true",
+        "NO_UPDATE_NOTIFIER": "1",
+        "LOCAL_SAFE_MODE": "true"
+      },
+      "restart": "no",
+      "pull_policy": "never",
+      "networks": [
+        "local-safe"
+      ],
+      "dns": [
+        "127.0.0.1"
+      ],
+      "cap_drop": [
+        "NET_RAW"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "entrypoint": [
+        "node",
+        "/opt/satorix-safe/frontend.mjs"
+      ],
+      "tmpfs": [
+        "/tmp"
+      ],
+      "depends_on": {
+        "layer6-api": {
+          "condition": "service_started"
+        }
+      }
+    }
+  },
+  "networks": {
+    "local-safe": {
+      "driver": "bridge",
+      "internal": false,
+      "enable_ipv6": false,
+      "driver_opts": {
+        "com.docker.network.bridge.enable_ip_masquerade": "false",
+        "com.docker.network.bridge.gateway_mode_ipv4": "nat"
+      }
+    }
+  },
+  "volumes": {
+    "postgres_data": {},
+    "frontend_shared_modules": {
+      "external": true,
+      "name": "infracore_foundry_frontend_shared_modules"
+    },
+    "intelligence_node_modules": {
+      "external": true,
+      "name": "infracore_foundry_intelligence_node_modules"
+    }
+  }
+}

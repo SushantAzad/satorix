@@ -2,6 +2,7 @@
 infracore_foundry/.env
 infracore_foundry/.env.*
 !infracore_foundry/.env.example
+!infracore_foundry/.env.gemini.example
 
 # Local dependencies and generated artifacts
 **/node_modules/
@@ -10,3 +11,6 @@ infracore_foundry/.env.*
 *.py[cod]
 .npm-cache/
 **/dist/
+*.tsbuildinfo
+**/.coverage
+**/htmlcov/

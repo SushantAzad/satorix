@@ -6,6 +6,7 @@ Falls back to demo/mock data when upstream layers are unavailable so the UI
 always has something meaningful to display.
 """
 import asyncio
+import os
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -315,6 +316,9 @@ async def build_entity_profile(
     # Assemble properties — fall back to demo data if L3 is unavailable
     # -----------------------------------------------------------------------
     using_demo = entity_data is None
+    if using_demo and os.getenv("SATORIX_FOCUSED") == "true":
+        from fastapi import HTTPException
+        raise HTTPException(404, "Entity unavailable; no demo profile substituted")
     if using_demo:
         logger.info(
             "Layer 3 unavailable for %s/%s — using demo data.", entity_type, entity_id
@@ -338,13 +342,15 @@ async def build_entity_profile(
     raw_risk_score: int = 0
     risk_flags: List[str] = []
     if risk_data:
-        raw_risk_score = int(risk_data.get("risk_score", 0))
+        raw_risk_score = int(risk_data.get("risk_score") or 0)
         risk_flags = risk_data.get("risk_flags", [])
     elif using_demo:
         raw_risk_score = int(props.get("risk_score", 0))
         risk_flags = props.get("risk_flags", [])
 
     risk_band = _risk_band(raw_risk_score)
+    if not using_demo and (not risk_data or risk_data.get("risk_score") is None):
+        risk_band = "NONE"
 
     # -----------------------------------------------------------------------
     # Metrics (type-specific)
@@ -381,6 +387,13 @@ async def build_entity_profile(
     narrative: Optional[str] = await clients.generate_narrative(
         entity_type, entity_id, narrative_context
     )
+    if os.getenv("SATORIX_FOCUSED") == "true":
+        risk_text = "unknown (not assessed)" if risk_band == "NONE" else f"{raw_risk_score}/100 ({risk_band})"
+        narrative = (
+            f"{entity_name}: recorded {entity_type} profile. Recorded risk is {risk_text}. "
+            "Use Intelligence to review loaded relationships and evidence. "
+            "No ML prediction, external verification or LLM analysis was performed."
+        )
     if not narrative:
         flag_str = ", ".join(risk_flags) if risk_flags else "no notable flags"
         if entity_type == "company":
@@ -469,7 +482,7 @@ async def build_entity_profile(
         "riskFlags": risk_flags,
         "investigationSignal": props.get("investigationSignal"),
         "properties": props,
-        "intelligenceSummary": narrative,
+        "intelligenceSummary": props.get("riskExplanation", narrative) if props.get("synthetic") else narrative,
         "metrics": metrics,
         "activeAlerts": alerts or [],
         "recentEvents": timeline or [],

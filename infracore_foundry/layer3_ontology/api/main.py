@@ -48,35 +48,36 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("Client isolation migration failed: %s", e)
 
-    # Initialize Neo4j
-    try:
-        await neo4j_client.connect()
-    except Exception as e:
-        logger.error("Neo4j connect failed: %s", e)
+    if os.getenv("SATORIX_FOCUSED") != "true":
+        # Initialize Neo4j
+        try:
+            await neo4j_client.connect()
+        except Exception as e:
+            logger.error("Neo4j connect failed: %s", e)
 
-    # Bootstrap Neo4j clientId indexes
-    try:
-        await Neo4jStore().setup_indexes()
-    except Exception as e:
-        logger.error("Neo4j index setup failed: %s", e)
+        # Bootstrap Neo4j clientId indexes
+        try:
+            await Neo4jStore().setup_indexes()
+        except Exception as e:
+            logger.error("Neo4j index setup failed: %s", e)
 
-    # Initialize Elasticsearch
-    try:
-        await es_client.connect()
-    except Exception as e:
-        logger.error("Elasticsearch connect failed: %s", e)
+        # Initialize Elasticsearch
+        try:
+            await es_client.connect()
+        except Exception as e:
+            logger.error("Elasticsearch connect failed: %s", e)
 
-    # Initialize Redis
-    try:
-        await redis_client.connect()
-    except Exception as e:
-        logger.error("Redis connect failed: %s", e)
+        # Initialize Redis
+        try:
+            await redis_client.connect()
+        except Exception as e:
+            logger.error("Redis connect failed: %s", e)
 
-    # Initialize MinIO
-    try:
-        minio_client.connect()
-    except Exception as e:
-        logger.error("MinIO connect failed: %s", e)
+        # Initialize MinIO
+        try:
+            minio_client.connect()
+        except Exception as e:
+            logger.error("MinIO connect failed: %s", e)
 
     # Seed schema registry
     try:

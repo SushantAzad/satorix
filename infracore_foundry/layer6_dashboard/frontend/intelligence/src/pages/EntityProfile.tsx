@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Download, Flag, FileText, ArrowLeft, Brain } from 'lucide-react'
+import { FileText, ArrowLeft, Brain } from 'lucide-react'
 import { entitiesApi } from '@shared/api/entities'
 import { useEntityStore } from '@shared/store/entityStore'
 import { RiskBadge } from '@shared/components/RiskBadge'
@@ -9,6 +9,8 @@ import { AlertBadge } from '@shared/components/AlertBadge'
 import { MetricCard } from '@shared/components/MetricCard'
 import { LoadingSpinner } from '@shared/components/LoadingSpinner'
 import { NetworkGraph } from '../components/graph/NetworkGraph'
+import { RelationshipExposure } from '../components/RelationshipExposure'
+import { EntityActions } from '../components/EntityActions'
 import { formatDistanceToNow, parseISO } from 'date-fns'
 
 const FLAG_COLORS: Record<string, string> = {
@@ -92,7 +94,7 @@ export function EntityProfile() {
             )}
           </div>
           <div className="flex items-center gap-3 flex-shrink-0">
-            <RiskBadge band={profile.riskBand} score={profile.riskScore} size="lg" />
+            <div><p className="text-xs text-gray-500 mb-1">Own recorded risk{profile.properties.synthetic === true ? ' · synthetic' : ''}</p><RiskBadge band={profile.riskBand} score={profile.riskScore} size="lg" /></div>
             <div className="flex flex-col gap-2">
               <Link to={`/reports?entity=${entityType}/${entityId}`}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors">
@@ -104,20 +106,13 @@ export function EntityProfile() {
                   <Brain className="h-3.5 w-3.5" /><span>Intelligence</span>
                 </Link>
               )}
-              <div className="flex gap-2">
-                <button className="flex items-center gap-1 px-3 py-1.5 border border-gray-300 text-sm text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
-                  <Flag className="h-3.5 w-3.5" /><span>Flag</span>
-                </button>
-                <button className="flex items-center gap-1 px-3 py-1.5 border border-gray-300 text-sm text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
-                  <Download className="h-3.5 w-3.5" /><span>Export</span>
-                </button>
-              </div>
+              <EntityActions key={`${entityType}/${entityId}`} entityType={entityType} entityId={entityId} profile={profile} />
             </div>
           </div>
         </div>
         <div className="flex items-center justify-between mt-2">
           <DataFreshnessPill source={profile.dataFreshness.source} lastSynced={profile.dataFreshness.lastSynced} />
-          {profile.mlPredictions.cirpProbability !== undefined && (
+          {profile.properties.synthetic !== true && profile.mlPredictions.cirpProbability != null && (
             <span className={`text-xs font-medium px-2 py-1 rounded-md ${profile.mlPredictions.cirpProbability > 0.6 ? 'bg-red-50 text-red-700' : profile.mlPredictions.cirpProbability > 0.3 ? 'bg-amber-50 text-amber-700' : 'bg-green-50 text-green-700'}`}>
               CIRP Risk: {Math.round(profile.mlPredictions.cirpProbability * 100)}%
             </span>
@@ -130,9 +125,11 @@ export function EntityProfile() {
         <div className="bg-gray-50 rounded-xl p-6">
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Intelligence Summary</p>
           <p className="text-base text-gray-700 leading-relaxed">{profile.intelligenceSummary || 'Intelligence summary is being generated. Please check back shortly.'}</p>
-          <p className="text-xs text-gray-400 mt-3 text-right">Powered by Satorix AI</p>
+          <p className="text-xs text-gray-400 mt-3 text-right">{profile.properties.synthetic === true ? 'Synthetic test data · not a production assessment' : 'Powered by Satorix AI'}</p>
         </div>
       </div>
+
+      <div className="px-8 py-6"><RelationshipExposure entityType={entityType} entityId={entityId} /></div>
 
       {/* Section 3: Relationship investigation signal */}
       {profile.investigationSignal && (

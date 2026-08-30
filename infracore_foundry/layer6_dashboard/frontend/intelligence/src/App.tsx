@@ -7,10 +7,9 @@ import { EntityProfile } from './pages/EntityProfile'
 import { NetworkExplorer } from './pages/NetworkExplorer'
 import { AlertsDashboard } from './pages/AlertsDashboard'
 import { ReportCenter } from './pages/ReportCenter'
-import { DataSources } from './pages/DataSources'
-import { IntelligencePage } from './pages/IntelligencePage'
+import CsvImport from './pages/CsvImport'
+import { FocusedIntelligence } from './pages/FocusedIntelligence'
 import { Navigation } from './components/Navigation'
-import { HealthIndicator } from './components/connectors/HealthIndicator'
 import { ErrorBoundary } from '@shared/components/ErrorBoundary'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -29,7 +28,6 @@ function AppLayout({ children }: { children: React.ReactNode }) {
       <main className="flex-1 pt-14">
         <ErrorBoundary>{children}</ErrorBoundary>
       </main>
-      <HealthIndicator />
     </div>
   )
 }
@@ -44,9 +42,10 @@ export default function App() {
         <Route path="/network/:entityType/:entityId" element={<ProtectedRoute><AppLayout><NetworkExplorer /></AppLayout></ProtectedRoute>} />
         <Route path="/alerts" element={<ProtectedRoute><AppLayout><AlertsDashboard /></AppLayout></ProtectedRoute>} />
         <Route path="/reports" element={<ProtectedRoute><AppLayout><ReportCenter /></AppLayout></ProtectedRoute>} />
-        <Route path="/sources" element={<ProtectedRoute><AppLayout><DataSources /></AppLayout></ProtectedRoute>} />
-        <Route path="/intelligence" element={<ProtectedRoute><AppLayout><IntelligencePage /></AppLayout></ProtectedRoute>} />
-        <Route path="/intelligence/:cin" element={<ProtectedRoute><AppLayout><IntelligencePage /></AppLayout></ProtectedRoute>} />
+        <Route path="/sources" element={<Navigate to="/imports" replace />} />
+        <Route path="/imports" element={<ProtectedRoute><AppLayout><CsvImport /></AppLayout></ProtectedRoute>} />
+        <Route path="/intelligence" element={<ProtectedRoute><AppLayout><FocusedIntelligence /></AppLayout></ProtectedRoute>} />
+        <Route path="/intelligence/:cin" element={<ProtectedRoute><AppLayout><FocusedIntelligence /></AppLayout></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

@@ -15,6 +15,7 @@ const navItems = [
   { to: '/kafka', icon: Zap, label: 'Kafka Monitor' },
   { to: '/sources', icon: Database, label: 'Source Health' },
   { to: '/ingestion', icon: ArrowRight, label: 'Ingestion Queue' },
+  { to: '/imports', icon: Database, label: 'CSV Import' },
   { to: '/ontology', icon: GitBranch, label: 'Ontology Health' },
   { to: '/models', icon: BarChart2, label: 'Model Performance' },
   { to: '/alerts-analytics', icon: Bell, label: 'Alert Analytics' },

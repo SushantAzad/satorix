@@ -113,7 +113,10 @@ from api.routes import (  # noqa: E402  (after app is created)
     alerts,
     auth,
     entities,
+    evidence,
     intelligence,
+    imports,
+    focused_intelligence,
     network,
     operational,
     reports,
@@ -124,14 +127,21 @@ from api.routes import (  # noqa: E402  (after app is created)
 
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(entities.router, prefix="/api/v1/entities", tags=["entities"])
+app.include_router(evidence.router, prefix="/api/v1/evidence", tags=["evidence"])
 app.include_router(network.router, prefix="/api/v1/network", tags=["network"])
-app.include_router(alerts.router, prefix="/api/v1/alerts", tags=["alerts"])
+from api.routes import focused_alerts, gemini
+app.include_router(gemini.router, prefix="/api/v1/gemini", tags=["gemini"])
+app.include_router(focused_alerts.router if os.getenv("SATORIX_FOCUSED") == "true" else alerts.router, prefix="/api/v1/alerts", tags=["alerts"])
 app.include_router(reports.router, prefix="/api/v1/reports", tags=["reports"])
-app.include_router(sources.router, prefix="/api/v1/sources", tags=["sources"])
+if os.getenv("SATORIX_FOCUSED") != "true":
+    app.include_router(sources.router, prefix="/api/v1/sources", tags=["sources"])
+app.include_router(imports.router, prefix="/api/v1/imports", tags=["imports"])
+app.include_router(focused_intelligence.router, prefix="/api/v1/focused-intelligence", tags=["intelligence"])
 app.include_router(watchlists.router, prefix="/api/v1/watchlists", tags=["watchlists"])
-app.include_router(operational.router, prefix="/api/v1/operational", tags=["operational"])
-app.include_router(intelligence.router, prefix="/api/v1/intelligence", tags=["intelligence"])
-app.include_router(ws_route.router, tags=["websocket"])
+if os.getenv("SATORIX_FOCUSED") != "true":
+    app.include_router(operational.router, prefix="/api/v1/operational", tags=["operational"])
+    app.include_router(intelligence.router, prefix="/api/v1/intelligence", tags=["intelligence"])
+    app.include_router(ws_route.router, tags=["websocket"])
 
 # ---------------------------------------------------------------------------
 # Health / root

@@ -100,6 +100,24 @@ class L6ReportCache(Base):
     expires_at = Column(DateTime(timezone=True), nullable=True)
 
 
+class L6ImportJob(Base):
+    __tablename__ = "l6_import_jobs"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("l6_users.id"), nullable=False)
+    client_id = Column(String(100), nullable=False)
+    payload = Column(JSONB, nullable=False)
+    result = Column(JSONB, nullable=False)
+    status = Column(String(30), nullable=False, default="ready")
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class L6SignalState(Base):
+    __tablename__ = "l6_signal_state"
+    client_id = Column(String(100), primary_key=True)
+    payload = Column(JSONB, nullable=False, default=dict)
+    scanned_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class L6RecentView(Base):
     __tablename__ = "l6_recent_views"
 

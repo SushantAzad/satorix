@@ -11,7 +11,7 @@ $ErrorActionPreference = 'Stop'
 if ($Mode -eq 'Safe') {
     & (Join-Path $PSScriptRoot 'start-local-safe.ps1') -CheckOnly:$CheckOnly
 } elseif ($Mode -eq 'Development') {
-    & (Join-Path $PSScriptRoot 'start-development.ps1') -CheckOnly:$CheckOnly
+    & (Join-Path $PSScriptRoot 'start-focused.ps1') -CheckOnly:$CheckOnly
 } else {
     & (Join-Path $PSScriptRoot 'start-unrestricted.ps1') -CheckOnly:$CheckOnly -SkipBuild:$SkipBuild -AcknowledgeUnrestrictedRisk:$AcknowledgeUnrestrictedRisk
 }

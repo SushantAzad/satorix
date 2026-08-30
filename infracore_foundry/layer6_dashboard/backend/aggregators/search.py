@@ -109,7 +109,7 @@ def _build_search_result(raw: Dict) -> Dict:
         "entityType": entity_type,
         "name": name,
         "riskScore": risk_score,
-        "riskBand": _risk_band(risk_score),
+        "riskBand": "NONE" if props.get("riskScore", props.get("risk_score")) is None else _risk_band(risk_score),
         "riskFlags": risk_flags,
         "description": description,
         "identifier": identifier,
