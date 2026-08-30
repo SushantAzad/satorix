@@ -30,6 +30,7 @@ async def get_network(
     entity_type: str,
     entity_id: str,
     depth: int = Query(2, ge=1, le=4, description="Graph traversal depth"),
+    refresh: bool = Query(False, description="Refresh live graph data instead of using cache"),
     current_user: Dict = Depends(get_current_user),
 ) -> Dict:
     """
@@ -44,7 +45,7 @@ async def get_network(
 
     client_id: str = current_user.get("client_id", "PLATFORM_GLOBAL")
     cache_key = f"network:{client_id}:{entity_type}:{entity_id}:depth{depth}"
-    cached = await get_cached(cache_key)
+    cached = None if refresh else await get_cached(cache_key)
     if cached:
         return cached
 

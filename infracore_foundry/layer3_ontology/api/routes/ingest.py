@@ -8,6 +8,14 @@ router = APIRouter(prefix="/ingest", tags=["ingestion"])
 _running_ingest_jobs: dict[str, Any] = {}
 
 
+@router.post("/fixture")
+async def ingest_fixture_manifest(body: dict[str, Any]) -> dict[str, Any]:
+    if set(body) != {"fixture_id", "manifest_bucket", "manifest_key"} or body.get("fixture_id") != "company_investigation_v1":
+        return {"status": "rejected", "error": "Only the sealed company fixture manifest is accepted"}
+    from ingestion.fixture_ingestor import ingest_company_fixture
+    return await ingest_company_fixture(body["manifest_bucket"], body["manifest_key"])
+
+
 @router.post("/trigger")
 async def trigger_ingestion(
     body: dict[str, Any],

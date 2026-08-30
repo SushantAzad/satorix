@@ -55,8 +55,8 @@ class EventStore:
                          property_name, old_value, new_value, actor_id, source, metadata)
                     VALUES
                         (:id, :occurred_at, :object_type, :object_id, :event_type,
-                         :property_name, :old_value::jsonb, :new_value::jsonb,
-                         :actor_id, :source, :metadata::jsonb)
+                         :property_name, CAST(:old_value AS jsonb), CAST(:new_value AS jsonb),
+                         :actor_id, :source, CAST(:metadata AS jsonb))
                 """),
                 {
                     "id": event.id,

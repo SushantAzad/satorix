@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 import pandas as pd
+from shared.local_safety import check_connector
 
 from layer1_ingestion.core.storage import upload_parquet, generate_object_path
 
@@ -119,6 +120,7 @@ class BaseConnector(ABC):
     """
 
     def __init__(self, source_id: str, config: dict) -> None:
+        check_connector(type(self).__name__, config)
         self.source_id = source_id
         self.config = config
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")

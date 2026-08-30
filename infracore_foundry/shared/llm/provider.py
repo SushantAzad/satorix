@@ -14,6 +14,7 @@ from enum import Enum
 from typing import Any, Optional
 
 import httpx
+from shared.local_safety import require_external_approval
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,7 @@ class AnthropicProvider(BaseLLMProvider):
     """
 
     def __init__(self) -> None:
+        require_external_approval("Anthropic provider")
         try:
             import anthropic
             api_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -259,6 +261,7 @@ class OllamaProvider(BaseLLMProvider):
     """
 
     def __init__(self) -> None:
+        require_external_approval("Ollama provider (not approved for safe mode)")
         self._base_url = os.environ.get(
             "OLLAMA_BASE_URL", "http://localhost:11434"
         ).rstrip("/")
@@ -458,6 +461,7 @@ class LLMProviderFactory:
 
     @classmethod
     def get_provider(cls) -> BaseLLMProvider:
+        require_external_approval("LLM providers (including unapproved Ollama endpoints)")
         if cls._instance is None:
             provider_type = os.environ.get(
                 "LLM_PROVIDER", LLMProviderType.ANTHROPIC

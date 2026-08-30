@@ -1,0 +1,2 @@
+# Fixture authorization checks exact bytes; preserve LF on every platform.
+infracore_foundry/local_safe/fixtures/** text eol=lf

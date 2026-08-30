@@ -299,9 +299,9 @@ class ObjectDataFunnel:
                 INSERT INTO ontology_objects
                     (object_type, primary_key, properties, data_hash, version, client_id, updated_at)
                 VALUES
-                    (:object_type, :primary_key, :properties::jsonb, :data_hash, :version, :client_id, NOW())
+                    (:object_type, :primary_key, CAST(:properties AS jsonb), :data_hash, :version, :client_id, NOW())
                 ON CONFLICT (object_type, primary_key, client_id) DO UPDATE
-                SET properties = :properties::jsonb,
+                SET properties = CAST(:properties AS jsonb),
                     data_hash = :data_hash,
                     version = :version,
                     updated_at = NOW(),
@@ -340,7 +340,7 @@ class ObjectDataFunnel:
                      client_id, updated_at)
                 VALUES
                     (:link_type, :source_type, :source_id, :target_type, :target_id,
-                     :properties::jsonb, :is_inferred, :inferred_by, :confidence,
+                     CAST(:properties AS jsonb), :is_inferred, :inferred_by, :confidence,
                      :client_id, NOW())
                 ON CONFLICT DO NOTHING
             """),

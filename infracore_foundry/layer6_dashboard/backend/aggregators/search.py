@@ -121,12 +121,13 @@ async def search(
     clients: LayerClients,
     query: str,
     limit: int = 20,
+    client_id: str = "PLATFORM_GLOBAL",
 ) -> Dict:
     """
     Search Layer 3, transform results, sort by risk score descending,
     and return grouped by entity type.
     """
-    raw_results = await clients.search_entities(query, limit=limit)
+    raw_results = await clients.search_entities(query, limit=limit, client_id=client_id)
 
     results = [_build_search_result(r) for r in raw_results]
 

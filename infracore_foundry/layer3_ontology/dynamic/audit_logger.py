@@ -38,8 +38,8 @@ class AuditLogger:
                              success, error_message)
                         VALUES
                             (:id, :ts, :actor_id, :actor_role, :action_type,
-                             :object_type, :object_id, :properties_accessed::jsonb,
-                             :old_value::jsonb, :new_value::jsonb,
+                             :object_type, :object_id, CAST(:properties_accessed AS jsonb),
+                             CAST(:old_value AS jsonb), CAST(:new_value AS jsonb),
                              :ip_address, :session_id, :success, :error_message)
                     """),
                     {

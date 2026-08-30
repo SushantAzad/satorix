@@ -1,0 +1,32 @@
+{
+  "name": "satorix-development",
+  "services": {
+    "layer1-api": {
+      "entrypoint": ["python", "/opt/satorix-safe/development_launch.py"],
+      "environment": {"DEVELOPMENT_MODE": "true", "LOCAL_SAFE_MODE": "true"}
+    },
+    "layer2-api": {
+      "entrypoint": ["python", "/opt/satorix-safe/development_launch.py"],
+      "environment": {"DEVELOPMENT_MODE": "true", "LOCAL_SAFE_MODE": "true"}
+    },
+    "layer3-api": {
+      "entrypoint": ["python", "/opt/satorix-safe/development_launch.py"],
+      "environment": {"DEVELOPMENT_MODE": "true", "LOCAL_SAFE_MODE": "true"}
+    },
+    "layer4-api": {
+      "entrypoint": ["python", "/opt/satorix-safe/development_launch.py"],
+      "environment": {"DEVELOPMENT_MODE": "true", "LOCAL_SAFE_MODE": "true"}
+    },
+    "layer5-api": {
+      "entrypoint": ["python", "/opt/satorix-safe/development_launch.py"],
+      "environment": {"DEVELOPMENT_MODE": "true", "LOCAL_SAFE_MODE": "true"}
+    },
+    "layer6-api": {
+      "entrypoint": ["python", "/opt/satorix-safe/development_launch.py"],
+      "environment": {"DEVELOPMENT_MODE": "true", "LOCAL_SAFE_MODE": "true"}
+    },
+    "intelligence-dashboard": {"environment": {"VITE_DEVELOPMENT_MODE": "true"}},
+    "operational-dashboard": {"environment": {"VITE_DEVELOPMENT_MODE": "true"}},
+    "schema-manager": {"environment": {"VITE_DEVELOPMENT_MODE": "true"}}
+  }
+}

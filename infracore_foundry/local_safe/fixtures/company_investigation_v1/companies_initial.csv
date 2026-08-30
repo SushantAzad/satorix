@@ -1,0 +1,12 @@
+source_record_id,company_id,company_name,address_id,status
+CROW-001,DEMO-C-001,SYNTHETIC Amberbridge Infrastructure Pvt Ltd,DEMO-A-001,active
+CROW-002,DEMO-C-001,  SYNTHETIC AMBERBRIDGE Infra Pvt. Ltd.  ,DEMO-A-001,active
+CROW-003,DEMO-C-001,Synthetic Amberbridge Infrastructure,DEMO-A-001,active
+CROW-004,DEMO-C-001,SYNTHETIC Amberbridge Infrastructure Pvt Ltd,DEMO-A-001,active
+CROW-005,DEMO-C-002,SYNTHETIC Copperfern Works,DEMO-A-001,active
+CROW-006,DEMO-C-003,SYNTHETIC Lilacwheel Projects,DEMO-A-002,active
+CROW-007,DEMO-C-004,SYNTHETIC Mosskite Services,DEMO-A-003,active
+CROW-008,DEMO-C-005,SYNTHETIC Silverthimble Works,DEMO-A-002,active
+CROW-009,INVALID-COMPANY,SYNTHETIC Invalid Identifier Company,DEMO-A-001,active
+CROW-010,DEMO-C-006,,DEMO-A-002,active
+CROW-011,,SYNTHETIC Amberbridge Infra,DEMO-A-001,active

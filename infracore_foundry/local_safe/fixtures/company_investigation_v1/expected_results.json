@@ -1,0 +1,89 @@
+{
+  "contract_version": "local-company-investigation/v1",
+  "dataset_id": "synthetic-company-investigation",
+  "client_id": "LOCAL_SYNTHETIC_DEMO",
+  "source_id": "local-synthetic-company-fixtures-v1",
+  "initial": {
+    "counts": {"input_rows": 24, "accepted_rows": 18, "rejected_rows": 5, "review_rows": 1, "canonical_entity_count": 11, "active_relationship_count": 9, "company_rows_consolidated": 3, "exact_duplicate_company_rows": 1},
+    "outcomes": {
+      "companies_initial.csv": {
+        "accepted": {"CROW-001": "DEMO-C-001", "CROW-002": "DEMO-C-001", "CROW-003": "DEMO-C-001", "CROW-004": "DEMO-C-001", "CROW-005": "DEMO-C-002", "CROW-006": "DEMO-C-003", "CROW-007": "DEMO-C-004", "CROW-008": "DEMO-C-005"},
+        "rejected": {"CROW-009": "invalid_company_id", "CROW-010": "missing_company_name"},
+        "review": {"CROW-011": "missing_authoritative_company_id"}
+      },
+      "directors_initial.csv": {
+        "accepted": {"DROW-001": "DEMO-D-001", "DROW-002": "DEMO-D-002", "DROW-003": "DEMO-D-003"},
+        "rejected": {"DROW-004": "invalid_director_id"},
+        "review": {}
+      },
+      "addresses_initial.csv": {
+        "accepted": {"AROW-001": "DEMO-A-001", "AROW-002": "DEMO-A-002", "AROW-003": "DEMO-A-003"},
+        "rejected": {"AROW-004": "missing_address_text"},
+        "review": {}
+      },
+      "directorships_initial.csv": {
+        "accepted": {"RROW-001": "DIRECTED|DEMO-D-001|DEMO-C-001", "RROW-002": "DIRECTED|DEMO-D-001|DEMO-C-002", "RROW-003": "DIRECTED|DEMO-D-002|DEMO-C-003", "RROW-004": "DIRECTED|DEMO-D-003|DEMO-C-004"},
+        "rejected": {"RROW-005": "unknown_company_reference"},
+        "review": {}
+      }
+    },
+    "canonical_entities": {
+      "Company": {
+        "DEMO-C-001": {"name": "SYNTHETIC Amberbridge Infrastructure Pvt Ltd", "status": "active", "address_id": "DEMO-A-001"},
+        "DEMO-C-002": {"name": "SYNTHETIC Copperfern Works", "status": "active", "address_id": "DEMO-A-001"},
+        "DEMO-C-003": {"name": "SYNTHETIC Lilacwheel Projects", "status": "active", "address_id": "DEMO-A-002"},
+        "DEMO-C-004": {"name": "SYNTHETIC Mosskite Services", "status": "active", "address_id": "DEMO-A-003"},
+        "DEMO-C-005": {"name": "SYNTHETIC Silverthimble Works", "status": "active", "address_id": "DEMO-A-002"}
+      },
+      "Director": {
+        "DEMO-D-001": {"name": "SYNTHETIC PERSON Azure Quill"},
+        "DEMO-D-002": {"name": "SYNTHETIC PERSON Hazel Comet"},
+        "DEMO-D-003": {"name": "SYNTHETIC PERSON Indigo Lantern"}
+      },
+      "Address": {
+        "DEMO-A-001": {"normalizedAddress": "synthetic site 10 papercloud lane fiction borough"},
+        "DEMO-A-002": {"normalizedAddress": "synthetic site 20 velvetwheel road fiction borough"},
+        "DEMO-A-003": {"normalizedAddress": "synthetic site 30 lanternleaf court fiction borough"}
+      }
+    },
+    "review_candidates": {"CROW-011": {"candidate_company_ids": ["DEMO-C-001"], "decision": "review", "automatic_merge": false, "published": false}},
+    "active_relationships": [
+      {"type": "DIRECTED", "source": "DEMO-D-001", "target": "DEMO-C-001", "evidence": ["RROW-001", "DROW-001", "CROW-001", "CROW-002", "CROW-003", "CROW-004"]},
+      {"type": "DIRECTED", "source": "DEMO-D-001", "target": "DEMO-C-002", "evidence": ["RROW-002", "DROW-001", "CROW-005"]},
+      {"type": "DIRECTED", "source": "DEMO-D-002", "target": "DEMO-C-003", "evidence": ["RROW-003", "DROW-002", "CROW-006"]},
+      {"type": "DIRECTED", "source": "DEMO-D-003", "target": "DEMO-C-004", "evidence": ["RROW-004", "DROW-003", "CROW-007"]},
+      {"type": "REGISTERED_AT", "source": "DEMO-C-001", "target": "DEMO-A-001", "evidence": ["CROW-001", "CROW-002", "CROW-003", "CROW-004", "AROW-001"]},
+      {"type": "REGISTERED_AT", "source": "DEMO-C-002", "target": "DEMO-A-001", "evidence": ["CROW-005", "AROW-001"]},
+      {"type": "REGISTERED_AT", "source": "DEMO-C-003", "target": "DEMO-A-002", "evidence": ["CROW-006", "AROW-002"]},
+      {"type": "REGISTERED_AT", "source": "DEMO-C-004", "target": "DEMO-A-003", "evidence": ["CROW-007", "AROW-003"]},
+      {"type": "REGISTERED_AT", "source": "DEMO-C-005", "target": "DEMO-A-002", "evidence": ["CROW-008", "AROW-002"]}
+    ],
+    "pair_scores": {"DEMO-C-001|DEMO-C-002": 3, "DEMO-C-001|DEMO-C-003": 0, "DEMO-C-001|DEMO-C-004": 0, "DEMO-C-001|DEMO-C-005": 0, "DEMO-C-002|DEMO-C-003": 0, "DEMO-C-002|DEMO-C-004": 0, "DEMO-C-002|DEMO-C-005": 0, "DEMO-C-003|DEMO-C-004": 0, "DEMO-C-003|DEMO-C-005": 1, "DEMO-C-004|DEMO-C-005": 0},
+    "investigation": {
+      "company": "DEMO-C-001", "directors": ["DEMO-D-001"], "shared_director_companies": ["DEMO-C-002"], "shared_address_companies": ["DEMO-C-002"],
+      "shortest_path_target": "DEMO-C-002", "shortest_path_hops": 2,
+      "allowed_shortest_paths": [["DEMO-C-001", "DEMO-D-001", "DEMO-C-002"], ["DEMO-C-001", "DEMO-A-001", "DEMO-C-002"]],
+      "disconnected_target": "DEMO-C-004"
+    }
+  },
+  "update": {
+    "file": "companies_update.csv", "mode": "patch_named_companies_only", "counts": {"input_rows": 1, "accepted_rows": 1, "rejected_rows": 0, "review_rows": 0, "canonical_entity_count": 11, "active_relationship_count": 9},
+    "canonical_mappings": {"UROW-001": "DEMO-C-002"},
+    "changes": [{"entity_id": "DEMO-C-002", "source_record_id": "UROW-001", "before": {"name": "SYNTHETIC Copperfern Works", "status": "active", "address_id": "DEMO-A-001"}, "after": {"name": "SYNTHETIC Copperfern Works Updated", "status": "paused", "address_id": "DEMO-A-003"}}],
+    "logical_change_event_count": 1,
+    "retired_relationships": ["REGISTERED_AT|DEMO-C-002|DEMO-A-001"],
+    "added_relationships": [{"type": "REGISTERED_AT", "source": "DEMO-C-002", "target": "DEMO-A-003", "evidence": ["UROW-001", "AROW-003"]}],
+    "active_relationship_keys": ["DIRECTED|DEMO-D-001|DEMO-C-001", "DIRECTED|DEMO-D-001|DEMO-C-002", "DIRECTED|DEMO-D-002|DEMO-C-003", "DIRECTED|DEMO-D-003|DEMO-C-004", "REGISTERED_AT|DEMO-C-001|DEMO-A-001", "REGISTERED_AT|DEMO-C-002|DEMO-A-003", "REGISTERED_AT|DEMO-C-003|DEMO-A-002", "REGISTERED_AT|DEMO-C-004|DEMO-A-003", "REGISTERED_AT|DEMO-C-005|DEMO-A-002"],
+    "pair_scores": {"DEMO-C-001|DEMO-C-002": 1, "DEMO-C-001|DEMO-C-003": 0, "DEMO-C-001|DEMO-C-004": 0, "DEMO-C-001|DEMO-C-005": 0, "DEMO-C-002|DEMO-C-003": 0, "DEMO-C-002|DEMO-C-004": 1, "DEMO-C-002|DEMO-C-005": 0, "DEMO-C-003|DEMO-C-004": 0, "DEMO-C-003|DEMO-C-005": 1, "DEMO-C-004|DEMO-C-005": 0}
+  },
+  "signal": {"name": "Relationship Investigation Signal", "version": "relationship-rules/v1", "rules": {"shared_director": 1, "shared_address": 1, "multiple_relationship_types": 1}, "minimum": 0, "maximum": 3, "interpretation": "Review aid only; not a prediction, probability, or allegation."},
+  "replay": {
+    "same_initial_before_update": {"new_canonical_entities": 0, "new_active_relationships": 0, "new_change_events": 0, "new_evidence_records": 0},
+    "same_update_after_update": {"new_canonical_entities": 0, "new_active_relationships": 0, "new_change_events": 0, "new_evidence_records": 0},
+    "same_initial_after_update": {"new_canonical_entities": 0, "new_active_relationships": 0, "new_change_events": 0, "new_evidence_records": 0, "reverts_update": false},
+    "outcome": "already_applied",
+    "canonical_entity_count": 11,
+    "active_relationship_count": 9,
+    "logical_change_events_after_update": 1
+  }
+}

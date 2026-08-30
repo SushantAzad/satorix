@@ -4,6 +4,7 @@ FastAPI application entry point with lifespan management, CORS, and route regist
 """
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -52,8 +53,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
 
     # Start Kafka consumer background task
     from websocket.kafka_consumer import run_kafka_consumer
-    kafka_task = asyncio.create_task(run_kafka_consumer())
-    logger.info("Kafka consumer background task started.")
+    kafka_task = None
+    if os.environ.get("LOCAL_SAFE_MODE", "true").lower() == "false":
+        kafka_task = asyncio.create_task(run_kafka_consumer())
+        logger.info("Kafka consumer background task started.")
+    else:
+        logger.info("LOCAL SAFE MODE: background consumer disabled")
 
     yield  # Application is running
 
@@ -61,10 +66,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     logger.info("Satorix Layer 6 API shutting down…")
 
     from websocket.kafka_consumer import stop_kafka_consumer
-    stop_kafka_consumer()
+    if kafka_task is not None:
+        stop_kafka_consumer()
     try:
-        kafka_task.cancel()
-        await asyncio.wait_for(asyncio.shield(kafka_task), timeout=5.0)
+        if kafka_task is not None:
+            kafka_task.cancel()
+            await asyncio.wait_for(asyncio.shield(kafka_task), timeout=5.0)
     except Exception:
         pass
 

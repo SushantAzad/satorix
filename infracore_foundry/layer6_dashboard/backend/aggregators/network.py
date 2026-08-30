@@ -188,7 +188,11 @@ def _build_edge(raw_edge: Dict, idx: int) -> Dict:
 
 
 def _sanitize_graph(nodes: List[Dict], edges: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
-    """Remove edges whose source or target node ID is not present in the nodes list."""
+    """Deduplicate nodes and remove edges whose endpoints are unavailable."""
+    unique_nodes: Dict[str, Dict] = {}
+    for node in nodes:
+        unique_nodes.setdefault(node["data"]["id"], node)
+    nodes = list(unique_nodes.values())
     node_ids = {n["data"]["id"] for n in nodes}
     valid: List[Dict] = []
     removed: List[Dict] = []

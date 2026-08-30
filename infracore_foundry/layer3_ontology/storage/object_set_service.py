@@ -24,7 +24,7 @@ class ObjectSetService:
             text("""
                 INSERT INTO ontology_object_sets
                     (id, name, description, set_type, object_type, static_members, created_by)
-                VALUES (:id, :name, :desc, 'static', :ot, :members::jsonb, :created_by)
+                VALUES (:id, :name, :desc, 'static', :ot, CAST(:members AS jsonb), :created_by)
             """),
             {
                 "id": set_id, "name": name, "desc": description,
@@ -48,7 +48,7 @@ class ObjectSetService:
             text("""
                 INSERT INTO ontology_object_sets
                     (id, name, description, set_type, object_type, filter_definition, created_by)
-                VALUES (:id, :name, :desc, 'dynamic', :ot, :filter_def::jsonb, :created_by)
+                VALUES (:id, :name, :desc, 'dynamic', :ot, CAST(:filter_def AS jsonb), :created_by)
             """),
             {
                 "id": set_id, "name": name, "desc": description,

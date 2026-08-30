@@ -1,29 +1,42 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from fastapi import Depends
 from typing import Any
 from core.database import get_db
 from kinetic.workflow_engine import workflow_engine
+from api.auth import require_platform_api_key
 import json
 
 router = APIRouter(prefix="/actions", tags=["actions"])
 
 
-@router.post("/{action_type_name}")
+@router.post("/{action_type_name}", dependencies=[Depends(require_platform_api_key)])
 async def execute_action(
     action_type_name: str,
     parameters: dict[str, Any],
-    actor_id: str = Query(default="anonymous"),
-    actor_role: str = Query(default="analyst"),
-    session_id: str = Query(default=""),
+    request: Request,
+    x_actor_id: str | None = Header(default=None, alias="X-Actor-Id"),
+    x_actor_role: str | None = Header(default=None, alias="X-Actor-Role"),
+    x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
 ) -> dict[str, Any]:
+    """Execute a governed Ontology Action on behalf of an authenticated actor.
+
+    Actor identity is deliberately accepted only from trusted BFF headers,
+    never query parameters supplied by an untrusted browser client.
+    """
+    if not x_actor_id or not x_actor_role:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="X-Actor-Id and X-Actor-Role headers are required for Actions.",
+        )
     result = await workflow_engine.execute_action(
         action_type_name=action_type_name,
         parameters=parameters,
-        actor_id=actor_id,
-        actor_role=actor_role,
-        session_id=session_id or None,
+        actor_id=x_actor_id,
+        actor_role=x_actor_role,
+        session_id=x_session_id,
+        ip_address=request.client.host if request.client else None,
     )
     return {
         "success": result.success,
@@ -36,7 +49,7 @@ async def execute_action(
     }
 
 
-@router.get("/history")
+@router.get("/history", dependencies=[Depends(require_platform_api_key)])
 async def get_action_history(
     object_type: str | None = None,
     object_id: str | None = None,
@@ -70,6 +83,6 @@ async def get_action_history(
     }
 
 
-@router.get("/types")
+@router.get("/types", dependencies=[Depends(require_platform_api_key)])
 async def list_action_types() -> dict[str, Any]:
     return {"action_types": workflow_engine.list_action_types()}

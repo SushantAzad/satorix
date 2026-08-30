@@ -35,20 +35,25 @@ class LayerClients:
     """Aggregated HTTP client for all upstream Satorix layers."""
 
     def __init__(self) -> None:
+        upstream_headers = {"X-API-Key": settings.api_key} if settings.api_key else {}
         self.l1_client: httpx.AsyncClient = httpx.AsyncClient(
             base_url=settings.layer1_api_url,
+            headers=upstream_headers,
             timeout=_TIMEOUT,
         )
         self.l3_client: httpx.AsyncClient = httpx.AsyncClient(
             base_url=settings.layer3_api_url,
+            headers=upstream_headers,
             timeout=_TIMEOUT,
         )
         self.l4_client: httpx.AsyncClient = httpx.AsyncClient(
             base_url=settings.layer4_api_url,
+            headers=upstream_headers,
             timeout=_TIMEOUT,
         )
         self.l5_client: httpx.AsyncClient = httpx.AsyncClient(
             base_url=settings.layer5_api_url,
+            headers=upstream_headers,
             timeout=_TIMEOUT,
         )
 
@@ -437,7 +442,7 @@ class LayerClients:
         if client_id:
             params["client_id"] = client_id
         try:
-            resp = await self.l1_client.get("/api/v1/sources", params=params)
+            resp = await self.l1_client.get("/api/v1/sources/", params=params)
             resp.raise_for_status()
             return resp.json() or []
         except Exception as exc:
@@ -467,7 +472,7 @@ class LayerClients:
     async def create_source(self, source_data: Dict) -> Optional[Dict]:
         """POST /api/v1/sources to Layer 1."""
         try:
-            resp = await self.l1_client.post("/api/v1/sources", json=source_data)
+            resp = await self.l1_client.post("/api/v1/sources/", json=source_data)
             resp.raise_for_status()
             return resp.json()
         except Exception as exc:

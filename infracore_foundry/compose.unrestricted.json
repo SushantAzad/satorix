@@ -1,0 +1,39 @@
+{
+  "name": "satorix-unrestricted",
+  "services": {
+    "airflow-init": {"environment": {"LOCAL_SAFE_MODE": "false"}},
+    "airflow-webserver": {"environment": {"LOCAL_SAFE_MODE": "false"}},
+    "airflow-scheduler": {"environment": {"LOCAL_SAFE_MODE": "false"}},
+    "airflow-worker": {"environment": {"LOCAL_SAFE_MODE": "false"}},
+    "streaming-worker": {
+      "environment": {
+        "LOCAL_SAFE_MODE": "false",
+        "ENABLE_EXTERNAL_CONNECTORS": "true",
+        "ENABLE_SCHEDULED_SYNC": "true"
+      }
+    },
+    "layer1-api": {
+      "environment": {
+        "LOCAL_SAFE_MODE": "false",
+        "ENABLE_EXTERNAL_CONNECTORS": "true",
+        "ENABLE_EXTERNAL_WEBHOOKS": "true",
+        "ENABLE_SCHEDULED_SYNC": "true",
+        "ENABLE_SCRAPING": "true"
+      }
+    },
+    "layer2-api": {"environment": {"LOCAL_SAFE_MODE": "false"}},
+    "layer3-api": {"environment": {"LOCAL_SAFE_MODE": "false"}},
+    "layer4-api": {
+      "environment": {"LOCAL_SAFE_MODE": "false", "ENABLE_EXTERNAL_LLM": "true"}
+    },
+    "layer5-api": {
+      "environment": {"LOCAL_SAFE_MODE": "false", "ENABLE_EXTERNAL_LLM": "true"}
+    },
+    "layer6-api": {
+      "environment": {"LOCAL_SAFE_MODE": "false", "ENABLE_EXTERNAL_LLM": "true"}
+    },
+    "intelligence-dashboard": {"environment": {"VITE_LOCAL_SAFE_MODE": "false"}},
+    "operational-dashboard": {"environment": {"VITE_LOCAL_SAFE_MODE": "false"}},
+    "schema-manager": {"environment": {"VITE_LOCAL_SAFE_MODE": "false"}}
+  }
+}

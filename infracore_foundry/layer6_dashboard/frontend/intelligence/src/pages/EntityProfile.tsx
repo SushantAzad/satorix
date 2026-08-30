@@ -134,7 +134,33 @@ export function EntityProfile() {
         </div>
       </div>
 
-      {/* Section 3: Metrics */}
+      {/* Section 3: Relationship investigation signal */}
+      {profile.investigationSignal && (
+        <div className="px-8 py-6 border-b border-gray-100">
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold text-blue-700 uppercase tracking-wider">Relationship Review Signal</p>
+                <p className="mt-1 text-sm text-blue-900">{profile.investigationSignal.name}</p>
+              </div>
+              <span className="rounded-lg bg-white px-3 py-1 text-sm font-semibold text-blue-800 border border-blue-200">
+                {profile.investigationSignal.score}/{profile.investigationSignal.maximum}
+              </span>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {profile.investigationSignal.flags.map(flag => (
+                <span key={flag} className="rounded-md bg-white px-2 py-1 text-xs font-medium text-blue-700 border border-blue-200">
+                  {flag.replace(/_/g, ' ')}
+                </span>
+              ))}
+            </div>
+            <p className="mt-3 text-xs text-blue-700">Related companies: {profile.investigationSignal.relatedCompanyIds.join(', ')}</p>
+            <p className="mt-2 text-xs text-blue-600">{profile.investigationSignal.interpretation}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Section 4: Metrics */}
       {profile.metrics.length > 0 && (
         <div className="px-8 py-6 border-b border-gray-100">
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">Key Metrics</p>
@@ -144,7 +170,7 @@ export function EntityProfile() {
         </div>
       )}
 
-      {/* Section 4: Network Graph */}
+      {/* Section 5: Network Graph */}
       <div className="px-8 py-6 border-b border-gray-100">
         <div className="flex items-center justify-between mb-4">
           <div>

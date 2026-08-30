@@ -6,6 +6,7 @@ import logging
 import sys
 import os
 from contextlib import asynccontextmanager
+from shared.local_safety import local_safe_mode
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,10 +41,13 @@ async def lifespan(app: FastAPI):
     await init_neo4j()
     logger.info("Neo4j read-only driver ready")
 
-    risk_delta.start()
-    alert_trigger.start()
-    trend_update.start()
-    logger.info("Kafka streaming workers started")
+    if not local_safe_mode():
+        risk_delta.start()
+        alert_trigger.start()
+        trend_update.start()
+        logger.info("Kafka streaming workers started")
+    else:
+        logger.info("LOCAL SAFE MODE: background consumers disabled")
 
     if not settings.anthropic_api_key:
         logger.warning(
@@ -57,9 +61,10 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("Layer 5 API shutting down")
-    risk_delta.stop()
-    alert_trigger.stop()
-    trend_update.stop()
+    if not local_safe_mode():
+        risk_delta.stop()
+        alert_trigger.stop()
+        trend_update.stop()
     close_producer()
     await close_neo4j()
     await close_db_pool()

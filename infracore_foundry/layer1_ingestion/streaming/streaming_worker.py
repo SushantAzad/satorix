@@ -50,6 +50,9 @@ def _parse_topics(raw: str) -> list[tuple[str, str, str]]:
 
 
 def main() -> None:
+    if os.environ.get("LOCAL_SAFE_MODE", "true").lower() != "false":
+        logger.warning("LOCAL SAFE MODE: streaming ingestion disabled")
+        return
     bootstrap_servers = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
     topics_raw = os.environ.get("KAFKA_TOPICS", "")
     group_id = os.environ.get("KAFKA_GROUP_ID", "infracore-l1-streaming")

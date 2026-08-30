@@ -6,6 +6,7 @@ export function useWebSocket(sessionId: string, onMessage: (data: Record<string,
   const WS_URL = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_WS_URL) || 'ws://localhost:8007'
 
   const connect = useCallback(() => {
+    if ((import.meta as any).env?.VITE_LOCAL_SAFE_MODE !== 'false') return
     const token = localStorage.getItem('satorix_token')
     if (!token) return
     try {

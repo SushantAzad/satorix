@@ -1,0 +1,13 @@
+# Local caches and generated dependencies
+
+**/.pytest_cache/
+**/**pycache**/
+**/node_modules/
+**/dist/
+
+# Repository metadata and local configuration
+
+.git/
+.env
+.env.\*
+!.env.example

@@ -35,6 +35,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("PostgreSQL init failed: %s", e)
 
+    # The ontology uses a generic SQL-backed object store rather than ORM models,
+    # so Base.metadata.create_all() cannot create these tables on a fresh install.
+    try:
+        await _run_base_schema_migration()
+    except Exception as e:
+        logger.error("Base ontology schema migration failed: %s", e)
+
     # Run multi-tenancy migration (idempotent — ADD COLUMN IF NOT EXISTS)
     try:
         await _run_client_isolation_migration()
@@ -121,6 +128,28 @@ async def _run_client_isolation_migration() -> None:
     logger.info("Client isolation migration applied")
 
 
+async def _run_base_schema_migration() -> None:
+    """Create the generic ontology tables on a fresh database."""
+    from pathlib import Path
+    from core.database import engine
+
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "schema_registry"
+        / "migrations"
+        / "001_ontology_schema.sql"
+    )
+    statements = [
+        statement.strip()
+        for statement in migration_path.read_text(encoding="utf-8").split(";")
+        if statement.strip()
+    ]
+    async with engine.begin() as connection:
+        for statement in statements:
+            await connection.exec_driver_sql(statement)
+    logger.info("Base ontology schema migration applied")
+
+
 async def _seed_schema() -> None:
     """Seed object type and link type definitions into the schema registry."""
     from core.database import AsyncSessionLocal
@@ -185,9 +214,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+_cors_origins = os.environ.get(
+    "CORS_ORIGINS",
+    "http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:8006",
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

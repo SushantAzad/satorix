@@ -4,6 +4,7 @@ Port: 8004
 """
 import logging
 from contextlib import asynccontextmanager
+from shared.local_safety import local_safe_mode
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,8 +37,11 @@ async def lifespan(app: FastAPI):
     await init_redis()
     logger.info("Redis client ready")
 
-    await start_cache_invalidator()
-    logger.info("Kafka cache invalidator started")
+    if not local_safe_mode():
+        await start_cache_invalidator()
+        logger.info("Kafka cache invalidator started")
+    else:
+        logger.info("LOCAL SAFE MODE: background consumer disabled")
 
     if not settings.api_key:
         logger.warning(
@@ -48,7 +52,8 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("Layer 4 API shutting down")
-    await stop_cache_invalidator()
+    if not local_safe_mode():
+        await stop_cache_invalidator()
     await close_redis()
     await close_neo4j()
     await close_db_pool()

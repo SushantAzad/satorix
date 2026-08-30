@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 import anthropic
+from shared.local_safety import local_safe_mode
 
 from core.config import settings
 from core.redis_client import cache_key, cache_get, cache_set
@@ -61,7 +62,7 @@ class ParsedQuery:
 
 class QueryParser:
     def __init__(self) -> None:
-        if settings.anthropic_api_key:
+        if not local_safe_mode() and settings.anthropic_api_key:
             self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
         else:
             self._client = None

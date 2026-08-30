@@ -467,6 +467,7 @@ async def build_entity_profile(
         "riskScore": raw_risk_score,
         "riskBand": risk_band,
         "riskFlags": risk_flags,
+        "investigationSignal": props.get("investigationSignal"),
         "properties": props,
         "intelligenceSummary": narrative,
         "metrics": metrics,

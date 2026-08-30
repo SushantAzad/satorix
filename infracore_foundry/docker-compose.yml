@@ -1,5 +1,3 @@
-version: "3.8"
-
 x-airflow-common: &airflow-common
   image: apache/airflow:2.7.3
   environment: &airflow-env
@@ -32,7 +30,6 @@ x-airflow-common: &airflow-common
 services:
   postgres:
     image: pgvector/pgvector:pg15
-    container_name: infracore_postgres
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -50,7 +47,6 @@ services:
 
   minio:
     image: minio/minio:latest
-    container_name: infracore_minio
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
@@ -69,7 +65,6 @@ services:
 
   minio-init:
     image: minio/mc
-    container_name: infracore_minio_init
     depends_on:
       minio:
         condition: service_healthy
@@ -90,7 +85,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: infracore_redis
     ports:
       - "6379:6379"
     volumes:
@@ -104,19 +98,17 @@ services:
 
   airflow-init:
     <<: *airflow-common
-    container_name: infracore_airflow_init
     environment:
       <<: *airflow-env
       _AIRFLOW_DB_UPGRADE: "true"
       _AIRFLOW_WWW_USER_CREATE: "true"
       _AIRFLOW_WWW_USER_USERNAME: admin
-      _AIRFLOW_WWW_USER_PASSWORD: admin
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:?Set AIRFLOW_ADMIN_PASSWORD in .env}
     command: version
     restart: "no"
 
   airflow-webserver:
     <<: *airflow-common
-    container_name: infracore_airflow_webserver
     command: webserver
     ports:
       - "8080:8080"
@@ -132,7 +124,6 @@ services:
 
   airflow-scheduler:
     <<: *airflow-common
-    container_name: infracore_airflow_scheduler
     command: scheduler
     depends_on:
       airflow-init:
@@ -150,7 +141,6 @@ services:
 
   airflow-worker:
     <<: *airflow-common
-    container_name: infracore_airflow_worker
     command: celery worker
     depends_on:
       airflow-init:
@@ -161,7 +151,6 @@ services:
     build:
       context: .
       dockerfile: layer1_ingestion/api/Dockerfile
-    container_name: infracore_layer1_api
     ports:
       - "8001:8001"
     environment:
@@ -194,7 +183,6 @@ services:
     build:
       context: .
       dockerfile: layer2_pipeline/api/Dockerfile
-    container_name: infracore_layer2_api
     ports:
       - "8002:8002"
     environment:
@@ -223,33 +211,33 @@ services:
     restart: unless-stopped
 
   kafka:
-    # image: bitnami/kafka:3.6.0
-    # image: bitnami/kafka:latest
-    # image: ghcr.io/bitnami/kafka:3.7.0
-    image: public.ecr.aws/bitnami/kafka:3.7.0
-    container_name: infracore_kafka
+    image: apache/kafka:3.7.0
     ports:
       - "9092:9092"
       - "9094:9094"
     environment:
-      KAFKA_CFG_NODE_ID: 0
-      KAFKA_CFG_PROCESS_ROLES: controller,broker
-      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,PLAINTEXT_HOST://0.0.0.0:9094,CONTROLLER://:9093
-      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9094
-      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
-      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_CFG_LOG_RETENTION_HOURS: 168
-      KAFKA_CFG_LOG_SEGMENT_BYTES: 1073741824
-      ALLOW_PLAINTEXT_LISTENER: "yes"
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: controller,broker
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,PLAINTEXT_HOST://:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
     volumes:
-      - kafka_data:/bitnami/kafka
+      - kafka_data:/var/lib/kafka/data
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1",
+          "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1",
         ]
       interval: 30s
       timeout: 15s
@@ -261,7 +249,6 @@ services:
     build:
       context: .
       dockerfile: layer1_ingestion/api/Dockerfile
-    container_name: infracore_streaming_worker
     command: ["python", "-m", "layer1_ingestion.streaming.streaming_worker"]
     environment:
       POSTGRES_HOST: postgres
@@ -294,7 +281,6 @@ services:
 
   neo4j:
     image: neo4j:5.14
-    container_name: infracore_neo4j
     hostname: neo4j
     ports:
       - "7474:7474"
@@ -321,7 +307,6 @@ services:
 
   elasticsearch:
     image: elasticsearch:8.11.0
-    container_name: infracore_elasticsearch
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
@@ -342,7 +327,8 @@ services:
     build:
       context: ./layer3_ontology
       dockerfile: Dockerfile
-    container_name: infracore_layer3_api
+    # Startup creates shared schema/indexes; serialize initialization locally.
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8003", "--workers", "1"]
     ports:
       - "8003:8003"
     environment:
@@ -360,6 +346,8 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       MINIO_SECURE: "false"
       REDIS_URL: redis://redis:6379/0
+      API_KEY: ${API_KEY:?Set API_KEY in .env}
+      CORS_ORIGINS: '["http://localhost:3000","http://localhost:3001","http://localhost:3002"]'
       LAYER3_API_PORT: 8003
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       SCHEMA_VERSION: 1.0.0
@@ -382,7 +370,8 @@ services:
     build:
       context: .
       dockerfile: layer4_graph_intelligence/Dockerfile
-    container_name: infracore_layer4_api
+    # Concurrent workers race on CREATE TABLE during first startup.
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8004", "--workers", "1"]
     ports:
       - "8004:8004"
     environment:
@@ -426,7 +415,8 @@ services:
     build:
       context: .
       dockerfile: layer5_analytics_ai/Dockerfile
-    container_name: infracore_layer5_api
+    # Concurrent workers race on CREATE TABLE during first startup.
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8005", "--workers", "1"]
     ports:
       - "8005:8005"
     environment:
@@ -475,7 +465,8 @@ services:
     build:
       context: ./layer6_dashboard/backend
       dockerfile: Dockerfile
-    container_name: layer6-api
+    # Serialize table creation and default-admin bootstrap locally.
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8006", "--workers", "1"]
     ports:
       - "8006:8006"
     environment:
@@ -489,9 +480,10 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       LAYER6_API_PORT: 8006
       LAYER6_WS_PORT: 8007
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-secret-key-change-in-production}
-      DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-admin@satorix.internal}
-      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-SatorixAdmin2026!}
+      API_KEY: ${API_KEY:?Set API_KEY in .env}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env}
+      DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:?Set DEFAULT_ADMIN_EMAIL in .env}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:?Set DEFAULT_ADMIN_PASSWORD in .env}
       CORS_ORIGINS: '["http://localhost:3000","http://localhost:3001","http://localhost:3002"]'
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
@@ -514,7 +506,6 @@ services:
 
   intelligence-dashboard:
     image: node:20-alpine
-    container_name: satorix_intelligence_dashboard
     working_dir: /frontend/intelligence
     command: sh -c "npm install --prefix /frontend && npm install && npm run dev -- --host"
     ports:
@@ -533,7 +524,6 @@ services:
 
   operational-dashboard:
     image: node:20-alpine
-    container_name: satorix_operational_dashboard
     working_dir: /frontend/operational
     command: sh -c "npm install --prefix /frontend && npm install && npm run dev -- --host"
     ports:
@@ -551,7 +541,6 @@ services:
 
   schema-manager:
     image: node:20-alpine
-    container_name: satorix_schema_manager
     working_dir: /frontend/schema
     command: sh -c "npm install --prefix /frontend && npm install && npm run dev -- --host"
     ports:
@@ -569,7 +558,6 @@ services:
 
   ollama:
     image: ollama/ollama:latest
-    container_name: satorix-ollama
     ports:
       - "11434:11434"
     volumes:
@@ -592,7 +580,6 @@ services:
 
   ollama-init:
     image: ollama/ollama:latest
-    container_name: satorix-ollama-init
     depends_on:
       ollama:
         condition: service_healthy

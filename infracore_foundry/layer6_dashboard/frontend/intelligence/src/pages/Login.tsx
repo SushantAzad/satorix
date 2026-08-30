@@ -52,7 +52,11 @@ export function Login() {
               {loading ? 'Signing in...' : 'Sign in'}
             </button>
           </form>
-          <p className="mt-4 text-xs text-center text-gray-400">Default: admin@satorix.internal · SatorixAdmin2026!</p>
+          {import.meta.env.VITE_LOCAL_SAFE_MODE === 'true' && (
+            <p className="mt-4 text-xs text-center text-gray-400">
+              Local demo: admin@satorix.internal · LocalFixtureAdminOnly123
+            </p>
+          )}
         </div>
       </div>
     </div>

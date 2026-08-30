@@ -10,7 +10,7 @@ from layer1_ingestion.connectors.s3_connector import S3Connector
 from layer1_ingestion.connectors.sftp_connector import SFTPConnector
 from layer1_ingestion.connectors.ftp_connector import FTPConnector
 from layer1_ingestion.connectors.rest_api_connector import RESTAPIConnector
-from layer1_ingestion.connectors.webhook_connector import WebhookConnector
+from layer1_ingestion.connectors.webhook_connector import WebhookReceiver
 from layer1_ingestion.connectors.google_sheets_connector import GoogleSheetsConnector
 
 # Database connectors
@@ -53,7 +53,7 @@ __all__ = [
     "BaseConnector",
     # Generic
     "CSVConnector", "ExcelConnector", "PDFConnector", "S3Connector",
-    "SFTPConnector", "FTPConnector", "RESTAPIConnector", "WebhookConnector",
+    "SFTPConnector", "FTPConnector", "RESTAPIConnector", "WebhookReceiver",
     "GoogleSheetsConnector",
     # Database
     "MySQLConnector", "PostgreSQLConnector", "MSSQLConnector",

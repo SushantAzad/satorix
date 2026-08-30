@@ -42,12 +42,13 @@ async def search_entities(
     """
     Search for entities across all types.  Results are sorted by risk score descending.
     """
-    cache_key = f"search:{q.lower()}:{limit}"
+    client_id: str = current_user.get("client_id", "PLATFORM_GLOBAL")
+    cache_key = f"search:{client_id}:{q.lower()}:{limit}"
     cached = await get_cached(cache_key)
     if cached:
         return cached
 
-    result = await aggregate_search(layer_clients, q, limit=limit)
+    result = await aggregate_search(layer_clients, q, limit=limit, client_id=client_id)
     await cache_response(cache_key, result, ttl=60)
     return result
 
@@ -87,6 +88,7 @@ async def get_recent_views(
 async def get_entity_profile(
     entity_type: str,
     entity_id: str,
+    refresh: bool = Query(False, description="Refresh live aggregate data instead of using cache"),
     current_user: Dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Dict:
@@ -103,7 +105,7 @@ async def get_entity_profile(
     client_id: str = current_user.get("client_id", "PLATFORM_GLOBAL")
     # Cache key is scoped per tenant so clients never share cached profiles.
     cache_key = f"entity_profile:{client_id}:{entity_type}:{entity_id}"
-    cached = await get_cached(cache_key)
+    cached = None if refresh else await get_cached(cache_key)
     if cached:
         # Still record the view even on cache hit
         await upsert_recent_view(

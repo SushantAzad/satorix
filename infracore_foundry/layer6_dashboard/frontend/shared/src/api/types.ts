@@ -35,6 +35,12 @@ export interface EntityProfile {
   mlPredictions: { cirpProbability?: number; projectCompletionProbability?: number; confidence?: number }
   trends?: TrendData[]; benchmark?: BenchmarkData; influenceScore?: number
   clusterInfo?: ClusterInfo; dataFreshness: { source: string; lastSynced: string }
+  investigationSignal?: InvestigationSignal
+}
+
+export interface InvestigationSignal {
+  name: string; version: string; score: number; maximum: number; flags: string[]
+  relatedCompanyIds: string[]; interpretation: string
 }
 
 export interface TimelineEvent {

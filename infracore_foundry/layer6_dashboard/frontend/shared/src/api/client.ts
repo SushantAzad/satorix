@@ -1,7 +1,8 @@
 import axios from 'axios'
 import { useAuthStore } from '../store/authStore'
 
-const API_URL = typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_URL || 'http://localhost:8006'
+const LOCAL_SAFE_MODE = (import.meta as any).env?.VITE_LOCAL_SAFE_MODE !== 'false'
+const API_URL = LOCAL_SAFE_MODE ? '/' : ((import.meta as any).env?.VITE_API_URL || 'http://localhost:8006')
 
 export const apiClient = axios.create({
   baseURL: API_URL,
@@ -10,6 +11,9 @@ export const apiClient = axios.create({
 })
 
 apiClient.interceptors.request.use((config) => {
+  if (LOCAL_SAFE_MODE && new URL(config.url || '/', window.location.origin).origin !== window.location.origin) {
+    throw new Error('LOCAL SAFE MODE: external API URL disabled')
+  }
   const token = localStorage.getItem('satorix_token')
   if (token) config.headers.Authorization = `Bearer ${token}`
   return config

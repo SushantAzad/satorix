@@ -1,0 +1,301 @@
+# Quarantine legacy startup. Use scripts/start-local-safe.ps1.
+services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    build: !reset null
+    pull_policy: never
+    entrypoint: ["/bin/sh", "-c", "echo LOCAL_SAFE_MODE: legacy service quarantined; exit 78"]
+    command: !reset []
+    network_mode: none
+    networks: !reset []
+    ports: !reset []
+    depends_on: !reset {}
+    restart: "no"
+    healthcheck:
+      disable: true
+  minio:
+    image: minio/minio:latest
+    build: !reset null
+    pull_policy: never
+    entrypoint: ["/bin/sh", "-c", "echo LOCAL_SAFE_MODE: legacy service quarantined; exit 78"]
+    command: !reset []
+    network_mode: none
+    networks: !reset []
+    ports: !reset []
+    depends_on: !reset {}
+    restart: "no"
+    healthcheck:
+      disable: true
+  minio-init:
+    image: minio/mc
+    build: !reset null
+    pull_policy: never
+    entrypoint: ["/bin/sh", "-c", "echo LOCAL_SAFE_MODE: legacy service quarantined; exit 78"]
+    command: !reset []
+    network_mode: none
+    networks: !reset []
+    ports: !reset []
+    depends_on: !reset {}
+    restart: "no"
+    healthcheck:
+      disable: true
+  redis:
+    image: redis:7-alpine
+    build: !reset null
+    pull_policy: never
+    entrypoint: ["/bin/sh", "-c", "echo LOCAL_SAFE_MODE: legacy service quarantined; exit 78"]
+    command: !reset []
+    network_mode: none
+    networks: !reset []
+    ports: !reset []
+    depends_on: !reset {}
+    restart: "no"
+    healthcheck:
+      disable: true
+  airflow-init:
+    image: apache/airflow:2.7.3
+    build: !reset null
+    pull_policy: never
+    entrypoint: ["/bin/sh", "-c", "echo LOCAL_SAFE_MODE: legacy service quarantined; exit 78"]
+    command: !reset []
+    network_mode: none
+    networks: !reset []
+    ports: !reset []
+    depends_on: !reset {}
+    restart: "no"
+    healthcheck:
+      disable: true
+  airflow-webserver:
+    image: apache/airflow:2.7.3
+    build: !reset null
+    pull_policy: never
+    entrypoint: ["/bin/sh", "-c", "echo LOCAL_SAFE_MODE: legacy service quarantined; exit 78"]
+    command: !reset []
+    network_mode: none
+    networks: !reset []
+    ports: !reset []
+    depends_on: !reset {}
+    restart: "no"
+    healthcheck:
+      disable: true
+  airflow-scheduler:
+    image: apache/airflow:2.7.3
+    build: !reset null
+    pull_policy: never
+    entrypoint: ["/bin/sh", "-c", "echo LOCAL_SAFE_MODE: legacy service quarantined; exit 78"]
+    command: !reset []
+    network_mode: none
+    networks: !reset []
+    ports: !reset []
+    depends_on: !reset {}
+    restart: "no"
+    healthcheck:
+      disable: true
+  airflow-worker:
+    image: apache/airflow:2.7.3
+    build: !reset null
+    pull_policy: never
+    entrypoint: ["/bin/sh", "-c", "echo LOCAL_SAFE_MODE: legacy service quarantined; exit 78"]
+    command: !reset []
+    network_mode: none
+    networks: !reset []
+    ports: !reset []
+    depends_on: !reset {}
+    restart: "no"
+    healthcheck:
+      disable: true
+  layer1-api:
+    image: infracore_foundry-layer1-api:latest
+    build: !reset null
+    pull_policy: never
+    entrypoint: ["/bin/sh", "-c", "echo LOCAL_SAFE_MODE: legacy service quarantined; exit 78"]
+    command: !reset []
+    network_mode: none
+    networks: !reset []
+    ports: !reset []
+    depends_on: !reset {}
+    restart: "no"
+    healthcheck:
+      disable: true
+  layer2-api:
+    image: infracore_foundry-layer2-api:latest
+    build: !reset null
+    pull_policy: never
+    entrypoint: ["/bin/sh", "-c", "echo LOCAL_SAFE_MODE: legacy service quarantined; exit 78"]
+    command: !reset []
+    network_mode: none
+    networks: !reset []
+    ports: !reset []
+    depends_on: !reset {}
+    restart: "no"
+    healthcheck:
+      disable: true
+  kafka:
+    image: apache/kafka:3.7.0
+    build: !reset null
+    pull_policy: never
+    entrypoint: ["/bin/sh", "-c", "echo LOCAL_SAFE_MODE: legacy service quarantined; exit 78"]
+    command: !reset []
+    network_mode: none
+    networks: !reset []
+    ports: !reset []
+    depends_on: !reset {}
+    restart: "no"
+    healthcheck:
+      disable: true
+  streaming-worker:
+    image: infracore_foundry-streaming-worker:latest
+    build: !reset null
+    pull_policy: never
+    entrypoint: ["/bin/sh", "-c", "echo LOCAL_SAFE_MODE: legacy service quarantined; exit 78"]
+    command: !reset []
+    network_mode: none
+    networks: !reset []
+    ports: !reset []
+    depends_on: !reset {}
+    restart: "no"
+    healthcheck:
+      disable: true
+  neo4j:
+    image: neo4j:5.14
+    build: !reset null
+    pull_policy: never
+    entrypoint: ["/bin/sh", "-c", "echo LOCAL_SAFE_MODE: legacy service quarantined; exit 78"]
+    command: !reset []
+    network_mode: none
+    networks: !reset []
+    ports: !reset []
+    depends_on: !reset {}
+    restart: "no"
+    healthcheck:
+      disable: true
+  elasticsearch:
+    image: elasticsearch:8.11.0
+    build: !reset null
+    pull_policy: never
+    entrypoint: ["/bin/sh", "-c", "echo LOCAL_SAFE_MODE: legacy service quarantined; exit 78"]
+    command: !reset []
+    network_mode: none
+    networks: !reset []
+    ports: !reset []
+    depends_on: !reset {}
+    restart: "no"
+    healthcheck:
+      disable: true
+  layer3-api:
+    image: infracore_foundry-layer3-api:latest
+    build: !reset null
+    pull_policy: never
+    entrypoint: ["/bin/sh", "-c", "echo LOCAL_SAFE_MODE: legacy service quarantined; exit 78"]
+    command: !reset []
+    network_mode: none
+    networks: !reset []
+    ports: !reset []
+    depends_on: !reset {}
+    restart: "no"
+    healthcheck:
+      disable: true
+  layer4-api:
+    image: infracore_foundry-layer4-api:latest
+    build: !reset null
+    pull_policy: never
+    entrypoint: ["/bin/sh", "-c", "echo LOCAL_SAFE_MODE: legacy service quarantined; exit 78"]
+    command: !reset []
+    network_mode: none
+    networks: !reset []
+    ports: !reset []
+    depends_on: !reset {}
+    restart: "no"
+    healthcheck:
+      disable: true
+  layer5-api:
+    image: infracore_foundry-layer5-api:latest
+    build: !reset null
+    pull_policy: never
+    entrypoint: ["/bin/sh", "-c", "echo LOCAL_SAFE_MODE: legacy service quarantined; exit 78"]
+    command: !reset []
+    network_mode: none
+    networks: !reset []
+    ports: !reset []
+    depends_on: !reset {}
+    restart: "no"
+    healthcheck:
+      disable: true
+  layer6-api:
+    image: infracore_foundry-layer6-api:latest
+    build: !reset null
+    pull_policy: never
+    entrypoint: ["/bin/sh", "-c", "echo LOCAL_SAFE_MODE: legacy service quarantined; exit 78"]
+    command: !reset []
+    network_mode: none
+    networks: !reset []
+    ports: !reset []
+    depends_on: !reset {}
+    restart: "no"
+    healthcheck:
+      disable: true
+  intelligence-dashboard:
+    image: node:20-alpine
+    build: !reset null
+    pull_policy: never
+    entrypoint: ["/bin/sh", "-c", "echo LOCAL_SAFE_MODE: legacy service quarantined; exit 78"]
+    command: !reset []
+    network_mode: none
+    networks: !reset []
+    ports: !reset []
+    depends_on: !reset {}
+    restart: "no"
+    healthcheck:
+      disable: true
+  operational-dashboard:
+    image: node:20-alpine
+    build: !reset null
+    pull_policy: never
+    entrypoint: ["/bin/sh", "-c", "echo LOCAL_SAFE_MODE: legacy service quarantined; exit 78"]
+    command: !reset []
+    network_mode: none
+    networks: !reset []
+    ports: !reset []
+    depends_on: !reset {}
+    restart: "no"
+    healthcheck:
+      disable: true
+  schema-manager:
+    image: node:20-alpine
+    build: !reset null
+    pull_policy: never
+    entrypoint: ["/bin/sh", "-c", "echo LOCAL_SAFE_MODE: legacy service quarantined; exit 78"]
+    command: !reset []
+    network_mode: none
+    networks: !reset []
+    ports: !reset []
+    depends_on: !reset {}
+    restart: "no"
+    healthcheck:
+      disable: true
+  ollama:
+    image: ollama/ollama:latest
+    build: !reset null
+    pull_policy: never
+    entrypoint: ["/bin/sh", "-c", "echo LOCAL_SAFE_MODE: legacy service quarantined; exit 78"]
+    command: !reset []
+    network_mode: none
+    networks: !reset []
+    ports: !reset []
+    depends_on: !reset {}
+    restart: "no"
+    healthcheck:
+      disable: true
+  ollama-init:
+    image: ollama/ollama:latest
+    build: !reset null
+    pull_policy: never
+    entrypoint: ["/bin/sh", "-c", "echo LOCAL_SAFE_MODE: legacy service quarantined; exit 78"]
+    command: !reset []
+    network_mode: none
+    networks: !reset []
+    ports: !reset []
+    depends_on: !reset {}
+    restart: "no"
+    healthcheck:
+      disable: true

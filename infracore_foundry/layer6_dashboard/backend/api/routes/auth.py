@@ -57,14 +57,19 @@ async def ensure_default_admin() -> None:
             result = await db.execute(text("SELECT COUNT(*) FROM l6_users"))
             count = result.scalar()
             if count and count > 0:
+                await db.execute(
+                    text("UPDATE l6_users SET client_id = :client_id WHERE email = :email"),
+                    {"client_id": settings.default_admin_client_id, "email": settings.default_admin_email},
+                )
+                await db.commit()
                 return
 
             logger.info("Creating default admin user: %s", settings.default_admin_email)
             await db.execute(
                 text(
                     """
-                    INSERT INTO l6_users (id, email, name, password_hash, role, is_active, created_at)
-                    VALUES (:id, :email, :name, :password_hash, :role, TRUE, NOW())
+                    INSERT INTO l6_users (id, email, name, password_hash, role, client_id, is_active, created_at)
+                    VALUES (:id, :email, :name, :password_hash, :role, :client_id, TRUE, NOW())
                     """
                 ),
                 {
@@ -73,6 +78,7 @@ async def ensure_default_admin() -> None:
                     "name": "Platform Administrator",
                     "password_hash": get_password_hash(settings.default_admin_password),
                     "role": "platform_administrator",
+                    "client_id": settings.default_admin_client_id,
                 },
             )
             await db.commit()

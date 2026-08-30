@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from layer1_ingestion.core.config import get_settings, _auto_register_connectors
 from layer1_ingestion.core.database import init_db
-from layer1_ingestion.api.routes import sources, sync, health, webhooks
+from layer1_ingestion.api.routes import sources, sync, health, webhooks, fixtures
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +69,7 @@ app.include_router(sources.router, prefix="/api/v1")
 app.include_router(sync.router, prefix="/api/v1")
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(webhooks.router, prefix="/api/v1")
+app.include_router(fixtures.router, prefix="/api/v1")
 
 
 @app.get("/", tags=["Root"])

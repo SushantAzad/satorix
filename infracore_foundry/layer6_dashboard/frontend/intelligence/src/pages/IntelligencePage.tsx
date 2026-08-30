@@ -103,10 +103,10 @@ function PredictionPanel({ prediction }: { prediction: Record<string, unknown> }
           <span className="font-medium">{(confidence * 100).toFixed(0)}%</span>
         </div>
       )}
-      {prediction.explanation && (
+      {Boolean(prediction.explanation) && (
         <p className="text-xs text-gray-500 italic mt-2">{String(prediction.explanation)}</p>
       )}
-      {prediction.model_type && (
+      {Boolean(prediction.model_type) && (
         <p className="text-xs text-gray-400">Model: {String(prediction.model_type)}</p>
       )}
     </div>
@@ -326,7 +326,7 @@ export function IntelligencePage() {
               <TrendingUp className="h-4 w-4 text-red-500" />
               <h2 className="font-semibold text-gray-900">Risk Prediction</h2>
             </div>
-            <PredictionPanel prediction={data.prediction} />
+            <PredictionPanel prediction={data.prediction as Record<string, unknown>} />
           </div>
 
           {/* Benchmark */}
@@ -337,7 +337,7 @@ export function IntelligencePage() {
                 {Object.entries(data.benchmark).slice(0, 6).map(([key, val]) => (
                   <div key={key} className="flex justify-between text-sm">
                     <span className="text-gray-500 capitalize">{key.replace(/_/g, ' ')}</span>
-                    <span className="font-medium">{typeof val === 'number' ? val.toFixed(2) : String(val)}</span>
+                    <span className="font-medium">{typeof val === 'number' ? val.toFixed(2) : String(val ?? '—')}</span>
                   </div>
                 ))}
               </div>
@@ -352,7 +352,7 @@ export function IntelligencePage() {
                 {Object.entries(data.network_influence).slice(0, 5).map(([key, val]) => (
                   <div key={key} className="flex justify-between text-sm">
                     <span className="text-gray-500 capitalize">{key.replace(/_/g, ' ')}</span>
-                    <span className="font-medium">{typeof val === 'number' ? val.toFixed(4) : String(val)}</span>
+                    <span className="font-medium">{typeof val === 'number' ? val.toFixed(4) : String(val ?? '—')}</span>
                   </div>
                 ))}
               </div>

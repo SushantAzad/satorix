@@ -1,0 +1,12 @@
+# Secrets and local environment configuration
+infracore_foundry/.env
+infracore_foundry/.env.*
+!infracore_foundry/.env.example
+
+# Local dependencies and generated artifacts
+**/node_modules/
+**/__pycache__/
+**/.pytest_cache/
+*.py[cod]
+.npm-cache/
+**/dist/

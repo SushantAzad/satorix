@@ -49,6 +49,9 @@ def _chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP)
 
 async def _get_embedding(text: str) -> Optional[list[float]]:
     """Call the LLM provider's embed method."""
+    from shared.local_safety import local_safe_mode
+    if local_safe_mode():
+        return None
     try:
         from shared.llm.provider import get_llm_provider
         provider = get_llm_provider()

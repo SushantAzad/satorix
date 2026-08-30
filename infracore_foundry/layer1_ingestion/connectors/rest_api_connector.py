@@ -287,3 +287,7 @@ class RestAPIConnector(BaseConnector):
                         break
 
         return all_items
+
+
+# Preserve the public name used by the connector package and registry.
+RESTAPIConnector = RestAPIConnector

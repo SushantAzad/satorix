@@ -42,6 +42,8 @@ _embed_model_instance = None
 
 
 def _get_embed_model():
+    from shared.local_safety import require_external_approval
+    require_external_approval("embedding model loading/download")
     global _embed_model_instance
     if _embed_model_instance is None:
         from sentence_transformers import SentenceTransformer

@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/1"
 
     # Upstream layer URLs
+    api_key: str = ""
     layer1_api_url: str = "http://layer1-api:8001"
     layer2_api_url: str = "http://layer2-api:8002"
     layer3_api_url: str = "http://layer3-api:8003"
@@ -38,6 +39,7 @@ class Settings(BaseSettings):
     # Default admin credentials (change in production)
     default_admin_email: str = "admin@satorix.internal"
     default_admin_password: str = "SatorixAdmin2026!"
+    default_admin_client_id: str = "PLATFORM_GLOBAL"
 
     # CORS
     cors_origins: List[str] = [
