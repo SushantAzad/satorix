@@ -2,7 +2,7 @@
 
 A local-first application for importing company records, investigating relationships, reviewing explainable risk signals, and producing report snapshots with optional Gemini commentary.
 
-**Stack:** Python · FastAPI · PostgreSQL · React · TypeScript · Cytoscape.js · Docker Compose
+**Stack:** Python · FastAPI · PostgreSQL · React · Docker Compose
 
 **Status:** working local-development MVP, under active validation. Not a production-ready compliance product. This README describes the focused application, not every historical module in the repository.
 
@@ -184,6 +184,7 @@ After changing the key, rerun the opt-in launcher to load the configuration. Lau
    ```
 
    This writes named synthetic records. Search **RISK LAB**, or inspect `TEST-RISK-C-001` through `TEST-RISK-C-012`.
+
 4. Inspect `TEST-RISK-D-006`: own recorded risk is `0`, while direct company exposure appears separately.
 5. Open **Alerts**, run a scan, acknowledge a signal, and rescan to verify persistence.
 6. Flag/unflag an entity and download its profile JSON.
@@ -245,4 +246,3 @@ These checks are not exhaustive browser automation, load testing, or security ce
 Keep changes scoped and add regression tests for changed contracts. Before publishing, inspect staged files for secrets, real imported data, generated exports, and obsolete claims. `.env.gemini` is ignored, but ignore rules do not remove secrets already committed to Git history. Rotate any exposed key and address its history separately.
 
 No license file is currently included. Public visibility alone does not grant an open-source license; choose and add a license before describing this as a licensed open-source release.
-
